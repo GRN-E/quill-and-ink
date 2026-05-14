@@ -1,4 +1,4 @@
-import { PenTool, Sparkles, Download, CloudCheck, Zap, Heart, Star, ArrowRight } from 'lucide-react';
+import { PenTool, Sparkles, Download, Cloud, Zap, Heart, Star, ArrowRight } from 'lucide-react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import Button from '../components/Button';
@@ -79,7 +79,7 @@ export default function Landing({ session }) {
                 desc: 'Each stroke responds to your speed and pressure. Thin lines on the upstroke, thick on the down. Just like a real pen.',
               },
               {
-                Icon: CloudCheck,
+                Icon: Cloud,
                 title: 'Saves to your account',
                 desc: 'Sign in on any device, and your alphabet is waiting. Phone, tablet, laptop — your work follows you.',
               },
