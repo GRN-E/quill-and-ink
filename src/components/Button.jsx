@@ -1,18 +1,6 @@
+import React from 'react';
 import { Link } from 'react-router-dom';
 
-// Reusable Button component used across the entire site
-// Variants:
-//   - primary: indigo filled (main CTA)
-//   - secondary: white with border
-//   - ghost: text-only, no background
-//   - dark: black filled
-// Sizes:
-//   - sm: small (in headers, dense UIs)
-//   - md: default
-//   - lg: large (hero CTAs)
-//
-// Use either `to` prop (renders Link) or `href` (renders anchor) or
-// onClick (renders button). Defaults to button.
 export default function Button({
   children,
   variant = 'primary',
@@ -28,14 +16,12 @@ export default function Button({
   rightIcon,
   ...rest
 }) {
-  // Base styles applied to every button
   const base =
     'inline-flex items-center justify-center font-medium ' +
     'transition-base whitespace-nowrap rounded-lg ' +
     'disabled:opacity-50 disabled:cursor-not-allowed ' +
     'focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
 
-  // Variant styles
   const variants = {
     primary:
       'bg-brand-600 text-white shadow-card hover:bg-brand-700 ' +
@@ -50,7 +36,6 @@ export default function Button({
       'active:bg-ink-900',
   };
 
-  // Size styles — padding and text size
   const sizes = {
     sm: 'px-3 py-1.5 text-sm gap-1.5',
     md: 'px-4 py-2.5 text-sm gap-2',
@@ -69,13 +54,13 @@ export default function Button({
 
   const content = (
     <>
-      {leftIcon && <span className="flex-shrink-0">{leftIcon}</span>}
+      {leftIcon ? <span className="flex-shrink-0">{leftIcon}</span> : null}
       {children}
-      {rightIcon && <span className="flex-shrink-0">{rightIcon}</span>}
+      {rightIcon ? <span className="flex-shrink-0">{rightIcon}</span> : null}
     </>
   );
 
-  // If `to` is provided, render a Link (internal navigation)
+  // Internal navigation via React Router
   if (to && !disabled) {
     return (
       <Link to={to} className={classes} {...rest}>
@@ -84,22 +69,20 @@ export default function Button({
     );
   }
 
-  // If `href` is provided, render an anchor (external link)
+  // External or mailto links — use React.createElement to avoid GitHub paste issues
   if (href && !disabled) {
-    return (
-      
-        href={href}
-        target={href.startsWith('http') ? '_blank' : undefined}
-        rel={href.startsWith('http') ? 'noopener noreferrer' : undefined}
-        className={classes}
-        {...rest}
-      >
-        {content}
-      </a>
-    );
+    const isExternal = href.startsWith('http');
+    const anchorProps = {
+      href: href,
+      className: classes,
+      target: isExternal ? '_blank' : undefined,
+      rel: isExternal ? 'noopener noreferrer' : undefined,
+      ...rest,
+    };
+    return React.createElement('a', anchorProps, content);
   }
 
-  // Default: render a button
+  // Default — plain button element
   return (
     <button
       type={type}
