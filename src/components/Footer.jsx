@@ -1,3 +1,4 @@
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { Twitter, Instagram, Github, Mail } from 'lucide-react';
 import Logo from './Logo';
@@ -29,17 +30,18 @@ const SOCIALS = [
 
 function SocialIcon(props) {
   const external = props.href.startsWith('http');
-  const Icon = props.Icon;
-  return (
-    
-      href={props.href}
-      aria-label={props.label}
-      target={external ? '_blank' : undefined}
-      rel={external ? 'noopener noreferrer' : undefined}
-      className="w-9 h-9 inline-flex items-center justify-center rounded-md text-ink-500 hover:text-ink-950 hover:bg-white hover:shadow-subtle transition-base"
-    >
-      <Icon size={16} />
-    </a>
+  const iconElement = React.createElement(props.Icon, { size: 16 });
+  return React.createElement(
+    'a',
+    {
+      href: props.href,
+      'aria-label': props.label,
+      target: external ? '_blank' : undefined,
+      rel: external ? 'noopener noreferrer' : undefined,
+      className:
+        'w-9 h-9 inline-flex items-center justify-center rounded-md text-ink-500 hover:text-ink-950 hover:bg-white hover:shadow-subtle transition-base',
+    },
+    iconElement
   );
 }
 
