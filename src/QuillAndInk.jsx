@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BookOpen,
@@ -19,26 +19,22 @@ import {
   Home,
   Sliders,
   Image as ImageIcon,
+  Palette,
 } from 'lucide-react';
 import { supabase } from './supabase';
 import Logo from './components/Logo';
 
+// ============ CONSTANTS ============
 const CATEGORIES = {
   uppercase: {
-    label: 'Uppercase',
-    short: 'A–Z',
+    label: 'Uppercase', short: 'A–Z',
     chars: Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)),
   },
   lowercase: {
-    label: 'Lowercase',
-    short: 'a–z',
+    label: 'Lowercase', short: 'a–z',
     chars: Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i)),
   },
-  numbers: {
-    label: 'Numbers',
-    short: '0–9',
-    chars: '0123456789'.split(''),
-  },
+  numbers: { label: 'Numbers', short: '0–9', chars: '0123456789'.split('') },
 };
 const ALL_CHARS = [
   ...CATEGORIES.uppercase.chars,
@@ -61,12 +57,7 @@ const classifyChar = (ch) => {
   return 'cap';
 };
 
-const ZONE_LAYOUT = {
-  ascender: 0.20,
-  cap: 0.45,
-  xheight: 0.20,
-  descender: 0.15,
-};
+const ZONE_LAYOUT = { ascender: 0.20, cap: 0.45, xheight: 0.20, descender: 0.15 };
 const TOP = 0;
 const CAP_LINE = ZONE_LAYOUT.ascender;
 const X_HEIGHT_LINE = CAP_LINE + ZONE_LAYOUT.cap;
@@ -94,7 +85,7 @@ const getDescenderDrop = (cls) => {
   return 0;
 };
 
-// ============ NOTEBOOK SETTINGS DEFAULTS ============
+// ============ NOTEBOOK DEFAULTS ============
 const PAPER_STYLES = {
   blank: { label: 'Blank' },
   lined: { label: 'Lined' },
@@ -103,47 +94,92 @@ const PAPER_STYLES = {
 };
 
 const DEFAULT_NOTEBOOK_SETTINGS = {
-  capHeight: 32,        // letter size in px
-  letterSpacing: 1,     // extra px between letters (multiplier of base)
-  wordSpacing: 0.4,     // word gap as fraction of capHeight
-  lineHeight: 1.6,      // line gap as multiplier of capHeight
+  capHeight: 32,
+  letterSpacing: 1,
+  wordSpacing: 0.4,
+  lineHeight: 1.6,
   paperStyle: 'lined',
 };
 
+// Color palette for the writing pen
+const PEN_COLORS = [
+  { hex: '#0a0a0a', label: 'Black' },
+  { hex: '#4f46e5', label: 'Indigo' },
+  { hex: '#dc2626', label: 'Red' },
+  { hex: '#16a34a', label: 'Green' },
+  { hex: '#2563eb', label: 'Blue' },
+  { hex: '#9333ea', label: 'Purple' },
+  { hex: '#b45309', label: 'Sepia' },
+];
+
+const DEFAULT_PEN_COLOR = PEN_COLORS[0].hex;
+
+// ============ TINTED-GLYPH CACHE ============
+// We cache pre-tinted versions of each glyph image (one per color used).
+// Black source pixels become the target color, alpha is preserved.
+const tintGlyphImage = (sourceImg, hex) => {
+  const cv = document.createElement('canvas');
+  cv.width = sourceImg.naturalWidth || sourceImg.width;
+  cv.height = sourceImg.naturalHeight || sourceImg.height;
+  const ctx = cv.getContext('2d');
+  // Draw source first
+  ctx.drawImage(sourceImg, 0, 0);
+  // Use source-in to recolor while preserving alpha
+  ctx.globalCompositeOperation = 'source-in';
+  ctx.fillStyle = hex;
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.globalCompositeOperation = 'source-over';
+  return cv;
+};
+
 // ============ CALLIGRAPHY PREVIEW CANVAS ============
-// Now accepts more controls and supports paper styles.
-// Forward a ref so the parent can trigger PNG export.
+// Now takes an array of "runs" — each run is { text, color }.
 const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
-  { text, customAlphabet, settings, padding, mobile },
+  { runs, customAlphabet, settings, padding },
   ref
 ) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
-  const cacheRef = useRef({});
+  const imageCacheRef = useRef({});        // src -> HTMLImageElement
+  const tintedCacheRef = useRef({});        // src + '|' + color -> tinted canvas
   const [tick, setTick] = useState(0);
 
-  // Expose the canvas element to parent via ref so parent can export
   React.useImperativeHandle(ref, () => ({
     getCanvas: () => canvasRef.current,
   }));
 
+  // Preload glyph base images
   useEffect(() => {
     let cancelled = false;
     Object.entries(customAlphabet).forEach(([ch, entry]) => {
       const src = typeof entry === 'string' ? entry : entry?.src;
-      if (!src || cacheRef.current[src]) return;
+      if (!src || imageCacheRef.current[src]) return;
       const img = new Image();
       img.onload = () => {
         if (cancelled) return;
-        cacheRef.current[src] = img;
+        imageCacheRef.current[src] = img;
         setTick((n) => n + 1);
       };
       img.src = src;
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [customAlphabet]);
+
+  // Get a tinted version of a glyph (cached)
+  const getTintedGlyph = (src, color) => {
+    const key = src + '|' + color;
+    if (tintedCacheRef.current[key]) return tintedCacheRef.current[key];
+    const baseImg = imageCacheRef.current[src];
+    if (!baseImg) return null;
+    if (color === '#0a0a0a' || color.toLowerCase() === DEFAULT_PEN_COLOR.toLowerCase()) {
+      // For default black, just use the source directly
+      tintedCacheRef.current[key] = baseImg;
+      return baseImg;
+    }
+    const tinted = tintGlyphImage(baseImg, color);
+    tintedCacheRef.current[key] = tinted;
+    return tinted;
+  };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -156,14 +192,23 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
 
     const dpr = window.devicePixelRatio || 1;
     const baseLetterSp = Math.max(1, Math.round(capHeight * 0.04));
-    const effectiveLetterSp = baseLetterSp + (letterSpacing - 1) * 4; // each "step" adds 4px
+    const effectiveLetterSp = baseLetterSp + (letterSpacing - 1) * 4;
     const wordGap = capHeight * wordSpacing;
     const lineH = capHeight * lineHeight;
     const maxX = W - padding;
 
     const measureCtx = canvas.getContext('2d');
 
-    const getGlyph = (ch) => {
+    // Flatten runs into a sequence of characters each with a color
+    const charsWithColor = [];
+    runs.forEach((run) => {
+      for (const ch of run.text) {
+        charsWithColor.push({ ch, color: run.color });
+      }
+    });
+
+    const getGlyph = (item) => {
+      const { ch, color } = item;
       const cls = classifyChar(ch);
       const renderH = capHeight * getRenderHeight(cls);
       const drop = capHeight * getDescenderDrop(cls);
@@ -171,16 +216,20 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
       const entry = customAlphabet[ch];
       const src = typeof entry === 'string' ? entry : entry?.src;
 
-      if (src && cacheRef.current[src]) {
-        const img = cacheRef.current[src];
-        const aspect = img.naturalWidth / img.naturalHeight || 1;
-        const w = renderH * aspect;
-        return { type: 'img', img, w, h: renderH, drop, ch, cls };
+      if (src) {
+        const tinted = getTintedGlyph(src, color);
+        if (tinted) {
+          const naturalW = tinted.naturalWidth || tinted.width;
+          const naturalH = tinted.naturalHeight || tinted.height;
+          const aspect = naturalW / naturalH || 1;
+          const w = renderH * aspect;
+          return { type: 'img', img: tinted, w, h: renderH, drop, ch, cls, color };
+        }
       }
       const fontSize = renderH * 1.05;
       measureCtx.font = `${fontSize}px Georgia, serif`;
       const w = measureCtx.measureText(ch).width;
-      return { type: 'text', ch, w, h: renderH, drop, fontSize, cls };
+      return { type: 'text', ch, w, h: renderH, drop, fontSize, cls, color };
     };
 
     // Tokenize: words, spaces, newlines
@@ -188,26 +237,20 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
     let buf = [];
     const flush = () => {
       if (buf.length) {
-        tokens.push({ kind: 'word', chars: buf });
+        tokens.push({ kind: 'word', items: buf });
         buf = [];
       }
     };
-    for (const ch of text) {
-      if (ch === '\n') {
-        flush();
-        tokens.push({ kind: 'newline' });
-      } else if (ch === ' ' || ch === '\t') {
-        flush();
-        tokens.push({ kind: 'space' });
-      } else {
-        buf.push(ch);
-      }
+    for (const it of charsWithColor) {
+      if (it.ch === '\n') { flush(); tokens.push({ kind: 'newline' }); }
+      else if (it.ch === ' ' || it.ch === '\t') { flush(); tokens.push({ kind: 'space' }); }
+      else { buf.push(it); }
     }
     flush();
 
     const sized = tokens.map((tk) => {
       if (tk.kind !== 'word') return tk;
-      const glyphs = tk.chars.map(getGlyph);
+      const glyphs = tk.items.map(getGlyph);
       let w = 0;
       glyphs.forEach((g, i) => {
         w += g.w;
@@ -223,10 +266,7 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
     let atStart = true;
     for (const tk of sized) {
       if (tk.kind === 'newline') {
-        lines.push(line);
-        line = [];
-        curX = padding;
-        atStart = true;
+        lines.push(line); line = []; curX = padding; atStart = true;
       } else if (tk.kind === 'space') {
         if (!atStart) {
           line.push({ kind: 'space' });
@@ -235,10 +275,7 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
       } else {
         if (curX + tk.width > maxX && !atStart) {
           while (line.length && line[line.length - 1].kind === 'space') line.pop();
-          lines.push(line);
-          line = [];
-          curX = padding;
-          atStart = true;
+          lines.push(line); line = []; curX = padding; atStart = true;
         }
         line.push({ ...tk, x: curX });
         curX += tk.width;
@@ -259,7 +296,7 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
 
-    // Paper background
+    // Background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, W, H);
 
@@ -302,10 +339,8 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
         ctx.stroke();
       }
     }
-    // 'blank' = no pattern
 
-    // Draw text
-    ctx.fillStyle = '#0a0a0a';
+    // Draw glyphs
     ctx.textBaseline = 'alphabetic';
 
     lines.forEach((ln, li) => {
@@ -314,7 +349,7 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
         if (tk.kind !== 'word') return;
         let x = tk.x;
         tk.glyphs.forEach((g, gi) => {
-          const seed = (Math.floor(tk.x) * 13 + gi * 17 + g.ch.charCodeAt(0)) % 100;
+          const seed = (Math.floor(tk.x) * 13 + gi * 17 + (g.ch.charCodeAt(0))) % 100;
           const wobble = (seed / 100) * 0.8 - 0.4;
           const rot = ((seed % 13) / 13 - 0.5) * 0.025;
 
@@ -327,6 +362,7 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
             const top = baselineY - g.h + g.drop;
             ctx.drawImage(g.img, x, top + wobble, g.w, g.h);
           } else {
+            ctx.fillStyle = g.color;
             ctx.font = `${g.fontSize}px Georgia, serif`;
             ctx.fillText(g.ch, x, baselineY + g.drop + wobble);
           }
@@ -335,7 +371,7 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
         });
       });
     });
-  }, [text, customAlphabet, settings, padding, tick]);
+  }, [runs, customAlphabet, settings, padding, tick]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -345,13 +381,16 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
     return () => obs.disconnect();
   }, []);
 
+  // Compute total text length to show the "empty" hint
+  const totalText = runs.map((r) => r.text).join('');
+
   return (
     <div
       ref={wrapRef}
       className="w-full h-full overflow-y-auto rounded-xl bg-white border border-ink-200 relative"
     >
       <canvas ref={canvasRef} style={{ display: 'block' }} />
-      {text.length === 0 && (
+      {totalText.length === 0 && (
         <div
           className="absolute top-0 left-0 italic pointer-events-none text-ink-400"
           style={{ padding, fontSize: settings.capHeight * 0.55 }}
@@ -363,7 +402,241 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
   );
 });
 
-// ============ NOTEBOOK TOOLBAR (sliders + paper + export) ============
+// ============ RICH-TEXT EDITOR ============
+// A contentEditable wrapper. Stores text as an array of { text, color } "runs".
+// Renders runs as <span style="color:..."> children.
+function RichTextEditor({ runs, setRuns, currentColor, setCurrentColor, mobile }) {
+  const editorRef = useRef(null);
+  const lastRangeRef = useRef(null);
+  const isComposingRef = useRef(false);
+
+  // Save current selection so color changes still apply if user clicked away
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && editorRef.current?.contains(sel.anchorNode)) {
+      lastRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const restoreSelection = () => {
+    const r = lastRangeRef.current;
+    if (!r) return false;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    return true;
+  };
+
+  // Parse the contenteditable DOM back into runs
+  const parseDomToRuns = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return [];
+    const out = [];
+    const walk = (node, inheritedColor) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = node.textContent;
+        if (t) out.push({ text: t, color: inheritedColor });
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName;
+      // <br> = newline
+      if (tag === 'BR') {
+        out.push({ text: '\n', color: inheritedColor });
+        return;
+      }
+      // Detect color on this node
+      let color = inheritedColor;
+      const styleColor = node.style?.color;
+      if (styleColor) {
+        // Convert rgb(...) to hex if needed
+        color = rgbToHex(styleColor) || styleColor;
+      }
+      // <div> or <p> may represent a new paragraph break
+      const isBlock = tag === 'DIV' || tag === 'P';
+      if (isBlock && out.length > 0 && !out[out.length - 1].text.endsWith('\n')) {
+        // Only add newline if this div isn't the very first wrapper
+        if (node.previousSibling) {
+          out.push({ text: '\n', color });
+        }
+      }
+      for (const child of node.childNodes) walk(child, color);
+    };
+    for (const child of editor.childNodes) walk(child, DEFAULT_PEN_COLOR);
+    // Merge adjacent runs with same color
+    const merged = [];
+    for (const r of out) {
+      if (merged.length && merged[merged.length - 1].color === r.color) {
+        merged[merged.length - 1].text += r.text;
+      } else {
+        merged.push({ ...r });
+      }
+    }
+    return merged;
+  }, []);
+
+  // Convert rgb(r,g,b) to #rrggbb
+  const rgbToHex = (rgb) => {
+    if (!rgb) return null;
+    if (rgb.startsWith('#')) return rgb;
+    const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    if (!m) return null;
+    const toHex = (n) => Number(n).toString(16).padStart(2, '0');
+    return ('#' + toHex(m[1]) + toHex(m[2]) + toHex(m[3])).toLowerCase();
+  };
+
+  // When the user types, parse and update runs
+  const handleInput = () => {
+    if (isComposingRef.current) return;
+    const parsed = parseDomToRuns();
+    setRuns(parsed);
+    saveSelection();
+  };
+
+  // Render initial content from runs whenever editor is first created OR runs change externally
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    // Only re-render if the editor's current text differs significantly from runs
+    const currentText = editor.innerText.replace(/\r\n/g, '\n');
+    const runsText = runs.map((r) => r.text).join('');
+    if (currentText === runsText) return;
+
+    editor.innerHTML = '';
+    runs.forEach((run) => {
+      const lines = run.text.split('\n');
+      lines.forEach((seg, i) => {
+        if (seg.length > 0) {
+          const span = document.createElement('span');
+          span.style.color = run.color;
+          span.textContent = seg;
+          editor.appendChild(span);
+        }
+        if (i < lines.length - 1) {
+          editor.appendChild(document.createElement('br'));
+        }
+      });
+    });
+  }, []); // initial mount only
+
+  // Set color for current selection (if any) — wraps selected text in a colored span
+  const applyColorToSelection = (color) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    if (!restoreSelection()) {
+      // No selection — just set current color for future typing
+      setCurrentColor(color);
+      return;
+    }
+    const sel = window.getSelection();
+    if (!sel.rangeCount) {
+      setCurrentColor(color);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    if (range.collapsed) {
+      // Just a caret position — set current color, don't wrap anything
+      setCurrentColor(color);
+      return;
+    }
+    // Wrap selection in a span with the new color
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('foreColor', false, color);
+    setCurrentColor(color);
+    // Re-parse
+    const parsed = parseDomToRuns();
+    setRuns(parsed);
+  };
+
+  // When user types fresh characters at the caret with no selection,
+  // we want them to take the current color. We can hint the browser
+  // by setting foreColor before the next input.
+  const handleBeforeInput = () => {
+    saveSelection();
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('foreColor', false, currentColor);
+  };
+
+  return (
+    <div className="h-full flex flex-col gap-2">
+      <ColorToolbar
+        currentColor={currentColor}
+        onPick={(hex) => applyColorToSelection(hex)}
+        mobile={mobile}
+      />
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={handleInput}
+        onBeforeInput={handleBeforeInput}
+        onMouseUp={saveSelection}
+        onKeyUp={saveSelection}
+        onCompositionStart={() => { isComposingRef.current = true; }}
+        onCompositionEnd={() => { isComposingRef.current = false; handleInput(); }}
+        spellCheck="false"
+        className="flex-1 w-full overflow-y-auto outline-none rounded-xl border border-ink-200 bg-white text-ink-900 hover:border-ink-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-base whitespace-pre-wrap"
+        style={{
+          padding: mobile ? '14px' : '24px',
+          fontSize: mobile ? '15px' : '16px',
+          lineHeight: mobile ? '24px' : '26px',
+          minHeight: '120px',
+        }}
+      />
+      <div className="flex items-center justify-between text-xs text-ink-500 px-1">
+        <span>
+          {runs.reduce((sum, r) => sum + r.text.length, 0)} chars ·{' '}
+          {runs.map((r) => r.text).join('').split(/\s+/).filter(Boolean).length} words
+        </span>
+        {runs.reduce((sum, r) => sum + r.text.length, 0) > 0 && (
+          <button
+            onClick={() => {
+              setRuns([{ text: '', color: DEFAULT_PEN_COLOR }]);
+              if (editorRef.current) editorRef.current.innerHTML = '';
+            }}
+            className="text-ink-500 hover:text-ink-900 underline transition-base"
+          >
+            Clear text
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============ COLOR TOOLBAR ============
+function ColorToolbar({ currentColor, onPick, mobile }) {
+  return (
+    <div className={`rounded-xl bg-white border border-ink-200 ${mobile ? 'p-2' : 'p-3'} flex items-center gap-2 flex-wrap`}>
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
+        <Palette size={11} /> Color
+      </span>
+      <div className="flex items-center gap-1">
+        {PEN_COLORS.map((c) => {
+          const active = c.hex.toLowerCase() === currentColor.toLowerCase();
+          return (
+            <button
+              key={c.hex}
+              onClick={() => onPick(c.hex)}
+              aria-label={c.label}
+              title={c.label}
+              className={`w-6 h-6 rounded-full transition-base relative ${
+                active ? 'ring-2 ring-offset-2 ring-brand-500 scale-110' : 'hover:scale-105'
+              }`}
+              style={{ background: c.hex }}
+            />
+          );
+        })}
+      </div>
+      <div className="ml-auto text-[10px] text-ink-500 hidden sm:block">
+        Select text, then pick a color
+      </div>
+    </div>
+  );
+}
+
+// ============ NOTEBOOK SETTINGS TOOLBAR ============
 function NotebookToolbar({ settings, setSettings, onExport, mobile }) {
   const update = (key) => (e) => setSettings({ ...settings, [key]: Number(e.target.value) });
   const setPaper = (style) => setSettings({ ...settings, paperStyle: style });
@@ -382,74 +655,57 @@ function NotebookToolbar({ settings, setSettings, onExport, mobile }) {
         </button>
       </div>
 
-      {/* Sliders grid */}
       <div className={`grid ${mobile ? 'grid-cols-2 gap-2.5' : 'grid-cols-4 gap-4'}`}>
         <div>
           <div className="flex justify-between mb-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">Size</span>
             <span className="text-[10px] font-bold text-brand-600">{settings.capHeight}px</span>
           </div>
-          <input
-            type="range" min="18" max="64" step="2"
-            value={settings.capHeight}
-            onChange={update('capHeight')}
-            className="w-full accent-brand-600"
-          />
+          <input type="range" min="18" max="64" step="2"
+            value={settings.capHeight} onChange={update('capHeight')}
+            className="w-full accent-brand-600" />
         </div>
         <div>
           <div className="flex justify-between mb-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">Letter sp.</span>
             <span className="text-[10px] font-bold text-brand-600">{settings.letterSpacing.toFixed(1)}</span>
           </div>
-          <input
-            type="range" min="0.5" max="5" step="0.1"
-            value={settings.letterSpacing}
-            onChange={update('letterSpacing')}
-            className="w-full accent-brand-600"
-          />
+          <input type="range" min="0.5" max="5" step="0.1"
+            value={settings.letterSpacing} onChange={update('letterSpacing')}
+            className="w-full accent-brand-600" />
         </div>
         <div>
           <div className="flex justify-between mb-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">Word sp.</span>
             <span className="text-[10px] font-bold text-brand-600">{settings.wordSpacing.toFixed(2)}</span>
           </div>
-          <input
-            type="range" min="0.15" max="1.2" step="0.05"
-            value={settings.wordSpacing}
-            onChange={update('wordSpacing')}
-            className="w-full accent-brand-600"
-          />
+          <input type="range" min="0.15" max="1.2" step="0.05"
+            value={settings.wordSpacing} onChange={update('wordSpacing')}
+            className="w-full accent-brand-600" />
         </div>
         <div>
           <div className="flex justify-between mb-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">Line height</span>
             <span className="text-[10px] font-bold text-brand-600">{settings.lineHeight.toFixed(1)}</span>
           </div>
-          <input
-            type="range" min="1.2" max="3" step="0.1"
-            value={settings.lineHeight}
-            onChange={update('lineHeight')}
-            className="w-full accent-brand-600"
-          />
+          <input type="range" min="1.2" max="3" step="0.1"
+            value={settings.lineHeight} onChange={update('lineHeight')}
+            className="w-full accent-brand-600" />
         </div>
       </div>
 
-      {/* Paper style buttons */}
       <div className="mt-3">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-500 mb-1.5">Paper</p>
         <div className="flex gap-1">
           {Object.entries(PAPER_STYLES).map(([key, info]) => {
             const active = settings.paperStyle === key;
             return (
-              <button
-                key={key}
-                onClick={() => setPaper(key)}
+              <button key={key} onClick={() => setPaper(key)}
                 className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-base ${
                   active
                     ? 'bg-brand-600 text-white shadow-card'
                     : 'bg-ink-50 text-ink-700 hover:bg-ink-100 border border-ink-200'
-                }`}
-              >
+                }`}>
                 {info.label}
               </button>
             );
@@ -460,6 +716,7 @@ function NotebookToolbar({ settings, setSettings, onExport, mobile }) {
   );
 }
 
+// ============ MAIN APP ============
 export default function VintageCalligraphyApp({ session }) {
   const navigate = useNavigate();
   const [customAlphabet, setCustomAlphabet] = useState({});
@@ -467,9 +724,13 @@ export default function VintageCalligraphyApp({ session }) {
   const [activeLetter, setActiveLetter] = useState('A');
   const [activeCategory, setActiveCategory] = useState('uppercase');
   const [activeView, setActiveView] = useState('editor');
-  const [text, setText] = useState(
-    'Dear friend,\n\nI am writing this in my own hand. The words flow together — each curve is mine.'
-  );
+
+  // The text is now stored as runs: array of { text, color }
+  const [runs, setRuns] = useState([
+    { text: 'Dear friend,\n\nI am writing this in my own hand. The words flow together — each curve is mine.', color: DEFAULT_PEN_COLOR },
+  ]);
+  const [currentColor, setCurrentColor] = useState(DEFAULT_PEN_COLOR);
+
   const [notebookMode, setNotebookMode] = useState('write');
   const [baseThickness, setBaseThickness] = useState(10);
   const [opacity, setOpacity] = useState(0.88);
@@ -478,8 +739,6 @@ export default function VintageCalligraphyApp({ session }) {
   const [isMobile, setIsMobile] = useState(false);
   const [showSliders, setShowSliders] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-
-  // Notebook settings — new in D₂
   const [notebookSettings, setNotebookSettings] = useState(DEFAULT_NOTEBOOK_SETTINGS);
 
   const [editorMode, setEditorMode] = useState('draw');
@@ -489,44 +748,34 @@ export default function VintageCalligraphyApp({ session }) {
 
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
-  const textareaRef = useRef(null);
   const userMenuRef = useRef(null);
-  const previewCanvasRef = useRef(null); // ref to CalligraphyCanvas for export
+  const previewCanvasRef = useRef(null);
   const isDrawing = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const lastTime = useRef(0);
   const currentWidth = useRef(baseThickness);
 
-  // Load saved alphabet
   useEffect(() => {
     if (!session?.user) return;
     let cancelled = false;
     (async () => {
       const { data } = await supabase
-        .from('alphabets')
-        .select('glyphs')
-        .eq('user_id', session.user.id)
-        .maybeSingle();
+        .from('alphabets').select('glyphs')
+        .eq('user_id', session.user.id).maybeSingle();
       if (!cancelled && data?.glyphs) setCustomAlphabet(data.glyphs);
       if (!cancelled) setSyncing(false);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [session?.user?.id]);
 
-  // Debounced save to Supabase
   useEffect(() => {
     if (syncing || !session?.user) return;
     const t = setTimeout(async () => {
-      await supabase.from('alphabets').upsert(
-        {
-          user_id: session.user.id,
-          glyphs: customAlphabet,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' }
-      );
+      await supabase.from('alphabets').upsert({
+        user_id: session.user.id,
+        glyphs: customAlphabet,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
     }, 1000);
     return () => clearTimeout(t);
   }, [customAlphabet, session?.user?.id, syncing]);
@@ -579,7 +828,6 @@ export default function VintageCalligraphyApp({ session }) {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.clearRect(0, 0, w, h);
-
       const entry = customAlphabet[activeLetter];
       const src = typeof entry === 'string' ? entry : entry?.src;
       if (src) {
@@ -607,13 +855,7 @@ export default function VintageCalligraphyApp({ session }) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.scale(dpr, dpr);
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(
-      transformImageRef.current,
-      transformBox.x,
-      transformBox.y,
-      transformBox.w,
-      transformBox.h
-    );
+    ctx.drawImage(transformImageRef.current, transformBox.x, transformBox.y, transformBox.w, transformBox.h);
   }, [transformBox, editorMode]);
 
   useEffect(() => {
@@ -703,10 +945,7 @@ export default function VintageCalligraphyApp({ session }) {
         }
       }
     }
-    if (!found) {
-      alert('Draw something first, then resize.');
-      return;
-    }
+    if (!found) { alert('Draw something first, then resize.'); return; }
     const tmp = document.createElement('canvas');
     tmp.width = maxX - minX;
     tmp.height = maxY - minY;
@@ -762,7 +1001,6 @@ export default function VintageCalligraphyApp({ session }) {
     const d = transformDragRef.current;
     const dx = x - d.startPos.x;
     const dy = y - d.startPos.y;
-
     if (d.kind === 'move') {
       setTransformBox({ ...d.startBox, x: d.startBox.x + dx, y: d.startBox.y + dy });
     } else if (d.kind === 'corner') {
@@ -770,22 +1008,18 @@ export default function VintageCalligraphyApp({ session }) {
       const MIN = 16;
       let newW, newH, nx, ny;
       if (d.corner === 'br') {
-        newW = Math.max(MIN, d.startBox.w + dx);
-        newH = newW / aspect;
+        newW = Math.max(MIN, d.startBox.w + dx); newH = newW / aspect;
         nx = d.startBox.x; ny = d.startBox.y;
       } else if (d.corner === 'tl') {
-        newW = Math.max(MIN, d.startBox.w - dx);
-        newH = newW / aspect;
+        newW = Math.max(MIN, d.startBox.w - dx); newH = newW / aspect;
         nx = d.startBox.x + d.startBox.w - newW;
         ny = d.startBox.y + d.startBox.h - newH;
       } else if (d.corner === 'tr') {
-        newW = Math.max(MIN, d.startBox.w + dx);
-        newH = newW / aspect;
+        newW = Math.max(MIN, d.startBox.w + dx); newH = newW / aspect;
         nx = d.startBox.x;
         ny = d.startBox.y + d.startBox.h - newH;
       } else {
-        newW = Math.max(MIN, d.startBox.w - dx);
-        newH = newW / aspect;
+        newW = Math.max(MIN, d.startBox.w - dx); newH = newW / aspect;
         nx = d.startBox.x + d.startBox.w - newW;
         ny = d.startBox.y;
       }
@@ -824,7 +1058,6 @@ export default function VintageCalligraphyApp({ session }) {
     const dpr = window.devicePixelRatio || 1;
     const w = src.width;
     const h = src.height;
-
     const region = getCaptureRegion(activeClass);
     const zoneTopPx = Math.floor(region.top * h);
     const zoneBottomPx = Math.ceil(region.bottom * h);
@@ -835,10 +1068,7 @@ export default function VintageCalligraphyApp({ session }) {
     for (let i = 3; i < data.length; i += 4) {
       if (data[i] > 10) { drewSomething = true; break; }
     }
-    if (!drewSomething) {
-      alert('The canvas is empty — draw something first.');
-      return;
-    }
+    if (!drewSomething) { alert('The canvas is empty — draw something first.'); return; }
 
     let minX = w, maxX = 0;
     for (let y = zoneTopPx; y < zoneBottomPx; y++) {
@@ -856,15 +1086,11 @@ export default function VintageCalligraphyApp({ session }) {
         if (x > maxX) maxX = x;
       }
     }
-    if (minX >= maxX) {
-      alert('Draw inside the visible drawing area first.');
-      return;
-    }
+    if (minX >= maxX) { alert('Draw inside the visible drawing area first.'); return; }
 
     const padX = Math.round(4 * dpr);
     minX = Math.max(0, minX - padX);
     maxX = Math.min(w, maxX + padX);
-
     const cw = maxX - minX;
     const ch = zoneHeight;
     const tmp = document.createElement('canvas');
@@ -894,16 +1120,11 @@ export default function VintageCalligraphyApp({ session }) {
   };
 
   const exportSheet = () => {
-    if (completedCount === 0) {
-      alert('Draw some letters before exporting.');
-      return;
-    }
+    if (completedCount === 0) { alert('Draw some letters before exporting.'); return; }
     const cell = 200, cols = 7;
     const headerH = 90, footerH = 50, sectionH = 40;
     const sections = ['uppercase', 'lowercase', 'numbers'];
-    const totalRows = sections.reduce(
-      (sum, s) => sum + Math.ceil(CATEGORIES[s].chars.length / cols), 0
-    );
+    const totalRows = sections.reduce((sum, s) => sum + Math.ceil(CATEGORIES[s].chars.length / cols), 0);
     const out = document.createElement('canvas');
     out.width = cell * cols;
     out.height = cell * totalRows + headerH + footerH + sectionH * sections.length;
@@ -977,17 +1198,11 @@ export default function VintageCalligraphyApp({ session }) {
     });
   };
 
-  // Export the rendered notebook canvas as PNG
   const exportNotebook = () => {
     const cv = previewCanvasRef.current?.getCanvas?.();
-    if (!cv) {
-      alert('Preview is not ready yet — open the Preview pane first.');
-      return;
-    }
-    if (!text.trim()) {
-      alert('Type something first, then export.');
-      return;
-    }
+    if (!cv) { alert('Preview is not ready yet — open the Preview pane first.'); return; }
+    const totalText = runs.map((r) => r.text).join('');
+    if (!totalText.trim()) { alert('Type something first, then export.'); return; }
     const link = document.createElement('a');
     link.download = 'inkly-notebook.png';
     link.href = cv.toDataURL('image/png');
@@ -1028,7 +1243,6 @@ export default function VintageCalligraphyApp({ session }) {
               borderTop: '1px dashed rgba(99, 102, 241, 0.3)',
             }} />
         )}
-
         <div className="absolute left-0 right-0"
           style={{
             top: `${CAP_LINE * 100}%`,
@@ -1040,7 +1254,6 @@ export default function VintageCalligraphyApp({ session }) {
             cap line
           </span>
         </div>
-
         <div className="absolute left-0 right-0"
           style={{
             top: `${X_HEIGHT_LINE * 100}%`,
@@ -1052,17 +1265,12 @@ export default function VintageCalligraphyApp({ session }) {
             x-height
           </span>
         </div>
-
         <div className="absolute left-0 right-0"
-          style={{
-            top: `${BASELINE * 100}%`,
-            borderTop: '2px solid rgba(99, 102, 241, 0.7)',
-          }}>
+          style={{ top: `${BASELINE * 100}%`, borderTop: '2px solid rgba(99, 102, 241, 0.7)' }}>
           <span className="absolute left-3 -top-4 text-[10px] font-bold text-brand-700 bg-white px-1.5 rounded">
             baseline
           </span>
         </div>
-
         <div className="absolute left-0 right-0"
           style={{
             top: `${DESCENDER_LINE * 100}%`,
@@ -1074,7 +1282,6 @@ export default function VintageCalligraphyApp({ session }) {
             descender
           </span>
         </div>
-
         <div className="absolute right-3 px-2 py-0.5 rounded text-[10px] font-bold bg-brand-600 text-white"
           style={{ top: `${region.top * 100 + 0.5}%` }}>
           {activeClass.toUpperCase()} ZONE
@@ -1233,55 +1440,20 @@ export default function VintageCalligraphyApp({ session }) {
     </header>
   );
 
-  const renderTextareaPane = (size = 'desktop') => {
-    const isM = size === 'mobile';
-    return (
-      <div className="h-full flex flex-col gap-2">
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          spellCheck="false"
-          placeholder="Begin writing here…"
-          className="flex-1 w-full resize-none outline-none rounded-xl border border-ink-200 bg-white text-ink-900 hover:border-ink-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-base"
-          style={{
-            padding: isM ? '14px' : '24px',
-            fontSize: isM ? '15px' : '16px',
-            lineHeight: isM ? '24px' : '26px',
-          }}
-        />
-        <div className="flex items-center justify-between text-xs text-ink-500 px-1">
-          <span>{text.length} chars · {text.split(/\s+/).filter(Boolean).length} words</span>
-          {text.length > 0 && (
-            <button onClick={() => setText('')}
-              className="text-ink-500 hover:text-ink-900 underline transition-base">
-              Clear text
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   const renderPreviewPane = (size = 'desktop') => {
     const isM = size === 'mobile';
-    // Scale settings for mobile (narrower screen)
     const effectiveSettings = isM
-      ? {
-          ...notebookSettings,
-          capHeight: Math.max(18, Math.round(notebookSettings.capHeight * 0.72)),
-        }
+      ? { ...notebookSettings, capHeight: Math.max(18, Math.round(notebookSettings.capHeight * 0.72)) }
       : notebookSettings;
     return (
       <div className="h-full flex flex-col gap-2">
         <div className="flex-1 min-h-0">
           <CalligraphyCanvas
             ref={previewCanvasRef}
-            text={text}
+            runs={runs}
             customAlphabet={customAlphabet}
             settings={effectiveSettings}
             padding={isM ? 14 : 28}
-            mobile={isM}
           />
         </div>
         <p className="text-xs text-ink-500 text-center">
@@ -1458,32 +1630,27 @@ export default function VintageCalligraphyApp({ session }) {
               <div className="flex gap-1 flex-shrink-0">
                 <button onClick={() => setNotebookMode('write')}
                   className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-base inline-flex items-center justify-center gap-1.5 ${
-                    notebookMode === 'write'
-                      ? 'bg-brand-600 text-white'
-                      : 'text-ink-600 border border-ink-200 bg-white'
+                    notebookMode === 'write' ? 'bg-brand-600 text-white' : 'text-ink-600 border border-ink-200 bg-white'
                   }`}>
                   <PenLine size={12} /> Write
                 </button>
                 <button onClick={() => setNotebookMode('preview')}
                   className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-base inline-flex items-center justify-center gap-1.5 ${
-                    notebookMode === 'preview'
-                      ? 'bg-brand-600 text-white'
-                      : 'text-ink-600 border border-ink-200 bg-white'
+                    notebookMode === 'preview' ? 'bg-brand-600 text-white' : 'text-ink-600 border border-ink-200 bg-white'
                   }`}>
                   <Eye size={12} /> Preview
                 </button>
               </div>
               {notebookMode === 'preview' && (
                 <NotebookToolbar
-                  settings={notebookSettings}
-                  setSettings={setNotebookSettings}
-                  onExport={exportNotebook}
-                  mobile={true}
+                  settings={notebookSettings} setSettings={setNotebookSettings}
+                  onExport={exportNotebook} mobile={true}
                 />
               )}
               <div className="flex-1 min-h-0" style={{ minHeight: '300px' }}>
                 {notebookMode === 'write'
-                  ? renderTextareaPane('mobile')
+                  ? <RichTextEditor runs={runs} setRuns={setRuns}
+                      currentColor={currentColor} setCurrentColor={setCurrentColor} mobile={true} />
                   : renderPreviewPane('mobile')}
               </div>
             </div>
@@ -1536,9 +1703,7 @@ export default function VintageCalligraphyApp({ session }) {
                     Letter <span className="text-brand-600">{activeLetter}</span>
                   </h1>
                   <p className="text-sm text-ink-500 mt-1">
-                    {inTransform
-                      ? 'Drag corner handles to resize · drag the box to reposition'
-                      : drawingHint()}
+                    {inTransform ? 'Drag corner handles to resize · drag the box to reposition' : drawingHint()}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1638,10 +1803,8 @@ export default function VintageCalligraphyApp({ session }) {
               </div>
 
               <NotebookToolbar
-                settings={notebookSettings}
-                setSettings={setNotebookSettings}
-                onExport={exportNotebook}
-                mobile={false}
+                settings={notebookSettings} setSettings={setNotebookSettings}
+                onExport={exportNotebook} mobile={false}
               />
 
               <div className="flex-1 min-h-0 grid grid-cols-2 gap-4">
@@ -1649,7 +1812,10 @@ export default function VintageCalligraphyApp({ session }) {
                   <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5">
                     <PenLine size={12} /> Write
                   </p>
-                  <div className="flex-1 min-h-0">{renderTextareaPane('desktop')}</div>
+                  <div className="flex-1 min-h-0">
+                    <RichTextEditor runs={runs} setRuns={setRuns}
+                      currentColor={currentColor} setCurrentColor={setCurrentColor} mobile={false} />
+                  </div>
                 </div>
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5">
