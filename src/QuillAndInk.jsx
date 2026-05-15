@@ -1,24 +1,49 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Feather, BookOpen, Download, Trash2, Save, Sparkles, Check, Edit3, Menu, X, ChevronRight, ChevronLeft, Eye, PenLine, Maximize2, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import {
+  BookOpen,
+  Download,
+  Trash2,
+  Save,
+  Check,
+  Edit3,
+  Menu,
+  X,
+  ChevronRight,
+  ChevronLeft,
+  Eye,
+  PenLine,
+  Maximize2,
+  LogOut,
+  Settings,
+  User,
+  Home,
+} from 'lucide-react';
 import { supabase } from './supabase';
-
-const C = {
-  parchment: '#f4ecd8',
-  parchmentLight: '#fdfaf3',
-  parchmentDark: '#ece3c6',
-  notebook: '#f0e6ce',
-  ink: '#3b2f2f',
-  inkSoft: 'rgba(59, 47, 47, 0.6)',
-  brass: '#b5a642',
-  brassDark: '#8a7d2e',
-};
+import Logo from './components/Logo';
 
 const CATEGORIES = {
-  uppercase: { label: 'Uppercase', short: 'A–Z', chars: Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)) },
-  lowercase: { label: 'Lowercase', short: 'a–z', chars: Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i)) },
-  numbers:   { label: 'Numbers',   short: '0–9', chars: '0123456789'.split('') },
+  uppercase: {
+    label: 'Uppercase',
+    short: 'A–Z',
+    chars: Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)),
+  },
+  lowercase: {
+    label: 'Lowercase',
+    short: 'a–z',
+    chars: Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i)),
+  },
+  numbers: {
+    label: 'Numbers',
+    short: '0–9',
+    chars: '0123456789'.split(''),
+  },
 };
-const ALL_CHARS = [...CATEGORIES.uppercase.chars, ...CATEGORIES.lowercase.chars, ...CATEGORIES.numbers.chars];
+const ALL_CHARS = [
+  ...CATEGORIES.uppercase.chars,
+  ...CATEGORIES.lowercase.chars,
+  ...CATEGORIES.numbers.chars,
+];
 
 const DESCENDERS = 'gjpqy';
 const ASCENDERS = 'bdfhklt';
@@ -46,6 +71,7 @@ const getBodyHeight = (cls) => {
   return X_HEIGHT_RATIO;
 };
 
+// ============ CALLIGRAPHY PREVIEW CANVAS ============
 const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpacing }) => {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
@@ -60,11 +86,13 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
       img.onload = () => {
         if (cancelled) return;
         cacheRef.current[src] = img;
-        setTick(n => n + 1);
+        setTick((n) => n + 1);
       };
       img.src = src;
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [customAlphabet]);
 
   useEffect(() => {
@@ -101,15 +129,26 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
 
     const tokens = [];
     let buf = [];
-    const flush = () => { if (buf.length) { tokens.push({ kind: 'word', chars: buf }); buf = []; } };
+    const flush = () => {
+      if (buf.length) {
+        tokens.push({ kind: 'word', chars: buf });
+        buf = [];
+      }
+    };
     for (const ch of text) {
-      if (ch === '\n') { flush(); tokens.push({ kind: 'newline' }); }
-      else if (ch === ' ' || ch === '\t') { flush(); tokens.push({ kind: 'space' }); }
-      else buf.push(ch);
+      if (ch === '\n') {
+        flush();
+        tokens.push({ kind: 'newline' });
+      } else if (ch === ' ' || ch === '\t') {
+        flush();
+        tokens.push({ kind: 'space' });
+      } else {
+        buf.push(ch);
+      }
     }
     flush();
 
-    const sized = tokens.map(tk => {
+    const sized = tokens.map((tk) => {
       if (tk.kind !== 'word') return tk;
       const glyphs = tk.chars.map(getGlyph);
       let w = 0;
@@ -125,12 +164,23 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
     let curX = padding;
     let atStart = true;
     for (const tk of sized) {
-      if (tk.kind === 'newline') { lines.push(line); line = []; curX = padding; atStart = true; }
-      else if (tk.kind === 'space') { if (!atStart) { line.push({ kind: 'space' }); curX += wordGap; } }
-      else {
+      if (tk.kind === 'newline') {
+        lines.push(line);
+        line = [];
+        curX = padding;
+        atStart = true;
+      } else if (tk.kind === 'space') {
+        if (!atStart) {
+          line.push({ kind: 'space' });
+          curX += wordGap;
+        }
+      } else {
         if (curX + tk.width > maxX && !atStart) {
           while (line.length && line[line.length - 1].kind === 'space') line.pop();
-          lines.push(line); line = []; curX = padding; atStart = true;
+          lines.push(line);
+          line = [];
+          curX = padding;
+          atStart = true;
         }
         line.push({ ...tk, x: curX });
         curX += tk.width;
@@ -152,7 +202,7 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, W, H);
 
-    ctx.strokeStyle = 'rgba(181, 166, 66, 0.3)';
+    ctx.strokeStyle = 'rgba(99, 102, 241, 0.18)';
     ctx.lineWidth = 1;
     const visibleLines = Math.ceil((H - padding) / lineH) + 1;
     for (let i = 0; i < visibleLines; i++) {
@@ -163,12 +213,12 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
       ctx.stroke();
     }
 
-    ctx.fillStyle = C.ink;
+    ctx.fillStyle = '#0a0a0a';
     ctx.textBaseline = 'alphabetic';
 
     lines.forEach((ln, li) => {
       const baselineY = padding + (li + 1) * lineH - capHeight * 0.2;
-      ln.forEach(tk => {
+      ln.forEach((tk) => {
         if (tk.kind !== 'word') return;
         let x = tk.x;
         tk.glyphs.forEach((g, gi) => {
@@ -198,24 +248,23 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
-    const obs = new ResizeObserver(() => setTick(n => n + 1));
+    const obs = new ResizeObserver(() => setTick((n) => n + 1));
     obs.observe(wrap);
     return () => obs.disconnect();
   }, []);
 
   return (
-    <div ref={wrapRef}
-      className="w-full h-full overflow-y-auto rounded shadow-md relative"
-      style={{
-        background: C.notebook,
-        borderLeft: `3px solid ${C.brass}`,
-        boxShadow: 'inset 0 0 12px rgba(59,47,47,0.05)',
-      }}>
+    <div
+      ref={wrapRef}
+      className="w-full h-full overflow-y-auto rounded-xl bg-white border border-ink-200 relative"
+    >
       <canvas ref={canvasRef} style={{ display: 'block' }} />
       {text.length === 0 && (
-        <div className="absolute top-0 left-0 italic pointer-events-none"
-          style={{ color: C.inkSoft, padding, fontSize: capHeight * 0.6 }}>
-          (empty — type something on the left)
+        <div
+          className="absolute top-0 left-0 italic pointer-events-none text-ink-400"
+          style={{ padding, fontSize: capHeight * 0.55 }}
+        >
+          Empty — type on the left to see your hand…
         </div>
       )}
     </div>
@@ -223,12 +272,15 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
 };
 
 export default function VintageCalligraphyApp({ session }) {
+  const navigate = useNavigate();
   const [customAlphabet, setCustomAlphabet] = useState({});
   const [syncing, setSyncing] = useState(true);
   const [activeLetter, setActiveLetter] = useState('A');
   const [activeCategory, setActiveCategory] = useState('uppercase');
   const [activeView, setActiveView] = useState('editor');
-  const [text, setText] = useState('Dear friend,\n\nI am writing this in my own hand. The words flow together — each curve is mine.');
+  const [text, setText] = useState(
+    'Dear friend,\n\nI am writing this in my own hand. The words flow together — each curve is mine.'
+  );
   const [notebookMode, setNotebookMode] = useState('write');
   const [baseThickness, setBaseThickness] = useState(10);
   const [opacity, setOpacity] = useState(0.88);
@@ -236,6 +288,7 @@ export default function VintageCalligraphyApp({ session }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [showSliders, setShowSliders] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const [editorMode, setEditorMode] = useState('draw');
   const [transformBox, setTransformBox] = useState(null);
@@ -245,6 +298,7 @@ export default function VintageCalligraphyApp({ session }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const textareaRef = useRef(null);
+  const userMenuRef = useRef(null);
   const isDrawing = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const lastTime = useRef(0);
@@ -262,26 +316,31 @@ export default function VintageCalligraphyApp({ session }) {
       if (!cancelled && data?.glyphs) setCustomAlphabet(data.glyphs);
       if (!cancelled) setSyncing(false);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [session?.user?.id]);
 
   useEffect(() => {
     if (syncing || !session?.user) return;
     const t = setTimeout(async () => {
-      await supabase.from('alphabets').upsert({
-        user_id: session.user.id,
-        glyphs: customAlphabet,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+      await supabase.from('alphabets').upsert(
+        {
+          user_id: session.user.id,
+          glyphs: customAlphabet,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      );
     }, 1000);
     return () => clearTimeout(t);
   }, [customAlphabet, session?.user?.id, syncing]);
 
   const completedCount = Object.keys(customAlphabet).length;
   const counts = {
-    uppercase: CATEGORIES.uppercase.chars.filter(c => customAlphabet[c]).length,
-    lowercase: CATEGORIES.lowercase.chars.filter(c => customAlphabet[c]).length,
-    numbers: CATEGORIES.numbers.chars.filter(c => customAlphabet[c]).length,
+    uppercase: CATEGORIES.uppercase.chars.filter((c) => customAlphabet[c]).length,
+    lowercase: CATEGORIES.lowercase.chars.filter((c) => customAlphabet[c]).length,
+    numbers: CATEGORIES.numbers.chars.filter((c) => customAlphabet[c]).length,
   };
 
   const detectCategory = (ch) => {
@@ -293,7 +352,7 @@ export default function VintageCalligraphyApp({ session }) {
   const activeClass = classifyChar(activeLetter);
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => setIsMobile(window.innerWidth < 1024);
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -344,8 +403,27 @@ export default function VintageCalligraphyApp({ session }) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.scale(dpr, dpr);
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(transformImageRef.current, transformBox.x, transformBox.y, transformBox.w, transformBox.h);
+    ctx.drawImage(
+      transformImageRef.current,
+      transformBox.x,
+      transformBox.y,
+      transformBox.w,
+      transformBox.h
+    );
   }, [transformBox, editorMode]);
+
+  // Close user menu when clicking outside
+  useEffect(() => {
+    const handler = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false);
+      }
+    };
+    if (userMenuOpen) {
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
+    }
+  }, [userMenuOpen]);
 
   const pickLetter = (ch) => {
     setActiveLetter(ch);
@@ -369,8 +447,8 @@ export default function VintageCalligraphyApp({ session }) {
     currentWidth.current = baseThickness;
     const ctx = canvasRef.current.getContext('2d');
     ctx.globalAlpha = opacity;
-    ctx.fillStyle = C.ink;
-    ctx.strokeStyle = C.ink;
+    ctx.fillStyle = '#0a0a0a';
+    ctx.strokeStyle = '#0a0a0a';
     ctx.beginPath();
     ctx.arc(x, y, baseThickness / 2, 0, Math.PI * 2);
     ctx.fill();
@@ -391,7 +469,7 @@ export default function VintageCalligraphyApp({ session }) {
     const ctx = canvasRef.current.getContext('2d');
     ctx.globalAlpha = opacity;
     ctx.lineWidth = currentWidth.current;
-    ctx.strokeStyle = C.ink;
+    ctx.strokeStyle = '#0a0a0a';
     ctx.lineTo(x, y);
     ctx.stroke();
     ctx.beginPath();
@@ -400,16 +478,23 @@ export default function VintageCalligraphyApp({ session }) {
     lastTime.current = t;
   };
 
-  const stopDrawing = () => { isDrawing.current = false; };
+  const stopDrawing = () => {
+    isDrawing.current = false;
+  };
 
   const enterTransformMode = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
+    const w = canvas.width;
+    const h = canvas.height;
     const data = ctx.getImageData(0, 0, w, h).data;
-    let minX = w, minY = h, maxX = 0, maxY = 0, found = false;
+    let minX = w,
+      minY = h,
+      maxX = 0,
+      maxY = 0,
+      found = false;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (data[(y * w + x) * 4 + 3] > 10) {
@@ -428,7 +513,9 @@ export default function VintageCalligraphyApp({ session }) {
     const tmp = document.createElement('canvas');
     tmp.width = maxX - minX;
     tmp.height = maxY - minY;
-    tmp.getContext('2d').drawImage(canvas, minX, minY, maxX - minX, maxY - minY, 0, 0, maxX - minX, maxY - minY);
+    tmp
+      .getContext('2d')
+      .drawImage(canvas, minX, minY, maxX - minX, maxY - minY, 0, 0, maxX - minX, maxY - minY);
     const img = new Image();
     img.onload = () => {
       transformImageRef.current = img;
@@ -462,12 +549,21 @@ export default function VintageCalligraphyApp({ session }) {
     ];
     for (const c of corners) {
       if (Math.abs(x - c.cx) < HANDLE_HIT && Math.abs(y - c.cy) < HANDLE_HIT) {
-        transformDragRef.current = { kind: 'corner', corner: c.name, startBox: { ...transformBox }, startPos: { x, y } };
+        transformDragRef.current = {
+          kind: 'corner',
+          corner: c.name,
+          startBox: { ...transformBox },
+          startPos: { x, y },
+        };
         return;
       }
     }
-    if (x >= transformBox.x && x <= transformBox.x + transformBox.w &&
-        y >= transformBox.y && y <= transformBox.y + transformBox.h) {
+    if (
+      x >= transformBox.x &&
+      x <= transformBox.x + transformBox.w &&
+      y >= transformBox.y &&
+      y <= transformBox.y + transformBox.h
+    ) {
       transformDragRef.current = { kind: 'move', startBox: { ...transformBox }, startPos: { x, y } };
     }
   };
@@ -489,7 +585,8 @@ export default function VintageCalligraphyApp({ session }) {
       if (d.corner === 'br') {
         newW = Math.max(MIN, d.startBox.w + dx);
         newH = newW / aspect;
-        nx = d.startBox.x; ny = d.startBox.y;
+        nx = d.startBox.x;
+        ny = d.startBox.y;
       } else if (d.corner === 'tl') {
         newW = Math.max(MIN, d.startBox.w - dx);
         newH = newW / aspect;
@@ -510,11 +607,16 @@ export default function VintageCalligraphyApp({ session }) {
     }
   };
 
-  const onTransformPointerUp = () => { transformDragRef.current = null; };
+  const onTransformPointerUp = () => {
+    transformDragRef.current = null;
+  };
 
-  const onCanvasDown = (e) => editorMode === 'transform' ? onTransformPointerDown(e) : startDrawing(e);
-  const onCanvasMove = (e) => editorMode === 'transform' ? onTransformPointerMove(e) : draw(e);
-  const onCanvasUp = () => editorMode === 'transform' ? onTransformPointerUp() : stopDrawing();
+  const onCanvasDown = (e) =>
+    editorMode === 'transform' ? onTransformPointerDown(e) : startDrawing(e);
+  const onCanvasMove = (e) =>
+    editorMode === 'transform' ? onTransformPointerMove(e) : draw(e);
+  const onCanvasUp = () =>
+    editorMode === 'transform' ? onTransformPointerUp() : stopDrawing();
 
   const clearCanvas = () => {
     const canvas = canvasRef.current;
@@ -528,7 +630,7 @@ export default function VintageCalligraphyApp({ session }) {
 
   const eraseLetter = () => {
     clearCanvas();
-    setCustomAlphabet(prev => {
+    setCustomAlphabet((prev) => {
       const next = { ...prev };
       delete next[activeLetter];
       return next;
@@ -538,9 +640,14 @@ export default function VintageCalligraphyApp({ session }) {
   const saveLetter = () => {
     const src = canvasRef.current;
     const ctx = src.getContext('2d');
-    const w = src.width, h = src.height;
+    const w = src.width;
+    const h = src.height;
     const data = ctx.getImageData(0, 0, w, h).data;
-    let minX = w, minY = h, maxX = 0, maxY = 0, found = false;
+    let minX = w,
+      minY = h,
+      maxX = 0,
+      maxY = 0,
+      found = false;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (data[(y * w + x) * 4 + 3] > 10) {
@@ -553,18 +660,23 @@ export default function VintageCalligraphyApp({ session }) {
       }
     }
     if (!found) {
-      alert("The inkwell is dry — draw something first.");
+      alert('The canvas is empty — draw something first.');
       return;
     }
-    const padX = 2, padY = 2;
-    minX = Math.max(0, minX - padX); minY = Math.max(0, minY - padY);
-    maxX = Math.min(w, maxX + padX); maxY = Math.min(h, maxY + padY);
-    const cw = maxX - minX, ch = maxY - minY;
+    const padX = 2,
+      padY = 2;
+    minX = Math.max(0, minX - padX);
+    minY = Math.max(0, minY - padY);
+    maxX = Math.min(w, maxX + padX);
+    maxY = Math.min(h, maxY + padY);
+    const cw = maxX - minX;
+    const ch = maxY - minY;
     const tmp = document.createElement('canvas');
-    tmp.width = cw; tmp.height = ch;
+    tmp.width = cw;
+    tmp.height = ch;
     tmp.getContext('2d').drawImage(src, minX, minY, cw, ch, 0, 0, cw, ch);
     const dataUrl = tmp.toDataURL('image/png');
-    setCustomAlphabet(prev => ({ ...prev, [activeLetter]: dataUrl }));
+    setCustomAlphabet((prev) => ({ ...prev, [activeLetter]: dataUrl }));
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1200);
     if (editorMode === 'transform') exitTransformMode();
@@ -583,43 +695,46 @@ export default function VintageCalligraphyApp({ session }) {
 
   const exportSheet = () => {
     if (completedCount === 0) {
-      alert("Your inkwell is empty — draw some letters before exporting.");
+      alert('Draw some letters before exporting.');
       return;
     }
-    const cell = 200, cols = 7;
-    const headerH = 90, footerH = 50, sectionH = 40;
+    const cell = 200,
+      cols = 7;
+    const headerH = 90,
+      footerH = 50,
+      sectionH = 40;
     const sections = ['uppercase', 'lowercase', 'numbers'];
-    const totalRows = sections.reduce((sum, s) => sum + Math.ceil(CATEGORIES[s].chars.length / cols), 0);
+    const totalRows = sections.reduce(
+      (sum, s) => sum + Math.ceil(CATEGORIES[s].chars.length / cols),
+      0
+    );
     const out = document.createElement('canvas');
     out.width = cell * cols;
     out.height = cell * totalRows + headerH + footerH + sectionH * sections.length;
     const ctx = out.getContext('2d');
-    ctx.fillStyle = C.parchment;
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, out.width, out.height);
-    const grad = ctx.createRadialGradient(out.width/2, out.height/2, 100, out.width/2, out.height/2, out.width/1.2);
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(59,47,47,0.12)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, out.width, out.height);
-    ctx.fillStyle = C.ink;
+    ctx.fillStyle = '#0a0a0a';
     ctx.textAlign = 'center';
-    ctx.font = 'italic 32px Georgia, serif';
-    ctx.fillText('My Vintage Alphabet', out.width / 2, 48);
-    ctx.fillStyle = C.brass;
-    ctx.font = 'italic 14px Georgia, serif';
-    ctx.fillText('— hand-drawn in Inkly —', out.width / 2, 72);
-    ctx.strokeStyle = C.brass;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(20, 20, out.width - 40, out.height - 40);
+    ctx.font = 'bold 32px Inter, sans-serif';
+    ctx.fillText('My Inkly Alphabet', out.width / 2, 48);
+    ctx.fillStyle = '#525252';
+    ctx.font = '14px Inter, sans-serif';
+    ctx.fillText('Hand-drawn at inkly.tech', out.width / 2, 72);
+    ctx.strokeStyle = '#e5e5e5';
     ctx.lineWidth = 1;
     ctx.strokeRect(28, 28, out.width - 56, out.height - 56);
 
     let pending = ALL_CHARS.length;
     const finish = () => {
-      ctx.fillStyle = C.brass;
-      ctx.font = 'italic 14px Georgia, serif';
+      ctx.fillStyle = '#737373';
+      ctx.font = '12px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`✦  ${completedCount} of ${ALL_CHARS.length} glyphs inscribed  ✦`, out.width / 2, out.height - 20);
+      ctx.fillText(
+        `${completedCount} of ${ALL_CHARS.length} glyphs · inkly.tech`,
+        out.width / 2,
+        out.height - 20
+      );
       const link = document.createElement('a');
       link.download = 'inkly-alphabet.png';
       link.href = out.toDataURL('image/png');
@@ -629,19 +744,25 @@ export default function VintageCalligraphyApp({ session }) {
     let yCursor = headerH;
     sections.forEach((sec) => {
       const chars = CATEGORIES[sec].chars;
-      ctx.fillStyle = C.brassDark;
-      ctx.font = 'bold italic 18px Georgia, serif';
+      ctx.fillStyle = '#4f46e5';
+      ctx.font = 'bold 16px Inter, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(`✦ ${CATEGORIES[sec].label} (${counts[sec]}/${chars.length})`, 40, yCursor + 24);
+      ctx.fillText(
+        `${CATEGORIES[sec].label} · ${counts[sec]}/${chars.length}`,
+        40,
+        yCursor + 24
+      );
       yCursor += sectionH;
       chars.forEach((letter, i) => {
-        const col = i % cols, row = Math.floor(i / cols);
-        const x = col * cell, y = row * cell + yCursor;
-        ctx.strokeStyle = 'rgba(181, 166, 66, 0.5)';
+        const col = i % cols,
+          row = Math.floor(i / cols);
+        const x = col * cell,
+          y = row * cell + yCursor;
+        ctx.strokeStyle = '#e5e5e5';
         ctx.lineWidth = 1;
         ctx.strokeRect(x + 8, y + 8, cell - 16, cell - 16);
-        ctx.fillStyle = C.brass;
-        ctx.font = 'bold 13px Georgia, serif';
+        ctx.fillStyle = '#a3a3a3';
+        ctx.font = 'bold 12px Inter, sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(letter, x + 16, y + 26);
         if (customAlphabet[letter]) {
@@ -649,15 +770,18 @@ export default function VintageCalligraphyApp({ session }) {
           img.onload = () => {
             const inner = cell - 50;
             const ratio = Math.min(inner / img.width, inner / img.height);
-            const dw = img.width * ratio, dh = img.height * ratio;
+            const dw = img.width * ratio,
+              dh = img.height * ratio;
             ctx.drawImage(img, x + (cell - dw) / 2, y + 35 + (inner - dh) / 2, dw, dh);
             if (--pending === 0) finish();
           };
-          img.onerror = () => { if (--pending === 0) finish(); };
+          img.onerror = () => {
+            if (--pending === 0) finish();
+          };
           img.src = customAlphabet[letter];
         } else {
-          ctx.fillStyle = 'rgba(59, 47, 47, 0.2)';
-          ctx.font = 'italic 24px Georgia, serif';
+          ctx.fillStyle = '#d4d4d4';
+          ctx.font = '24px Inter, sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText('—', x + cell / 2, y + cell / 2 + 5);
           if (--pending === 0) finish();
@@ -669,34 +793,60 @@ export default function VintageCalligraphyApp({ session }) {
 
   const drawingHint = () => {
     if (activeClass === 'cap') return 'Cap line to baseline';
-    if (activeClass === 'xheight') return 'X-height to baseline (small body)';
+    if (activeClass === 'xheight') return 'X-height to baseline (small)';
     if (activeClass === 'ascender') return 'Body x-height; stem to cap';
-    if (activeClass === 'descender') return 'Body x-height; tail to desc';
+    if (activeClass === 'descender') return 'Body x-height; tail to descender';
     return '';
   };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
+    navigate('/');
   };
 
-  const renderEditorGuides = (category, mobile = false) => {
-    const CAP = 0.18, XHEIGHT = 0.42, BASE = 0.78, DESC = 0.94;
+  // ============ SUB-RENDERERS ============
+
+  const renderEditorGuides = (category) => {
+    const CAP = 0.18,
+      XHEIGHT = 0.42,
+      BASE = 0.78,
+      DESC = 0.94;
     const showXHeight = category === 'lowercase';
     return (
       <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute left-0 right-0" style={{ top: `${CAP * 100}%`, borderTop: `1px dashed ${C.brass}55` }}>
-          {!mobile && <span className="absolute left-2 -top-3 text-[10px] italic" style={{ color: C.brass, opacity: 0.7 }}>cap</span>}
+        <div
+          className="absolute left-0 right-0"
+          style={{ top: `${CAP * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}
+        >
+          <span className="absolute left-3 -top-3 text-[10px] font-medium text-brand-600 bg-white px-1">
+            cap
+          </span>
         </div>
         {showXHeight && (
-          <div className="absolute left-0 right-0" style={{ top: `${XHEIGHT * 100}%`, borderTop: `1px dashed ${C.brass}88` }}>
-            {!mobile && <span className="absolute left-2 -top-3 text-[10px] italic font-bold" style={{ color: C.brassDark }}>x-height</span>}
+          <div
+            className="absolute left-0 right-0"
+            style={{ top: `${XHEIGHT * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.55)' }}
+          >
+            <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1">
+              x-height
+            </span>
           </div>
         )}
-        <div className="absolute left-0 right-0" style={{ top: `${BASE * 100}%`, borderTop: `2px solid ${C.brass}99` }}>
-          {!mobile && <span className="absolute left-2 -top-4 text-[10px] italic font-bold" style={{ color: C.brassDark }}>baseline</span>}
+        <div
+          className="absolute left-0 right-0"
+          style={{ top: `${BASE * 100}%`, borderTop: '2px solid rgba(99,102,241,0.6)' }}
+        >
+          <span className="absolute left-3 -top-4 text-[10px] font-semibold text-brand-700 bg-white px-1">
+            baseline
+          </span>
         </div>
-        <div className="absolute left-0 right-0" style={{ top: `${DESC * 100}%`, borderTop: `1px dashed ${C.brass}55` }}>
-          {!mobile && <span className="absolute left-2 -top-3 text-[10px] italic" style={{ color: C.brass, opacity: 0.7 }}>desc</span>}
+        <div
+          className="absolute left-0 right-0"
+          style={{ top: `${DESC * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}
+        >
+          <span className="absolute left-3 -top-3 text-[10px] font-medium text-brand-600 bg-white px-1">
+            desc
+          </span>
         </div>
       </div>
     );
@@ -714,67 +864,102 @@ export default function VintageCalligraphyApp({ session }) {
     ];
     return (
       <>
-        <div className="absolute pointer-events-none"
+        <div
+          className="absolute pointer-events-none"
           style={{
-            left: transformBox.x, top: transformBox.y,
-            width: transformBox.w, height: transformBox.h,
-            border: `2px dashed ${C.brass}`,
-            background: 'rgba(181, 166, 66, 0.05)',
-          }} />
+            left: transformBox.x,
+            top: transformBox.y,
+            width: transformBox.w,
+            height: transformBox.h,
+            border: '2px dashed #4f46e5',
+            background: 'rgba(99, 102, 241, 0.06)',
+          }}
+        />
         {corners.map((c, i) => (
-          <div key={i} className="absolute pointer-events-none rounded-full"
+          <div
+            key={i}
+            className="absolute pointer-events-none rounded-full bg-brand-600 border-2 border-white shadow-card"
             style={{
-              left: c.l - half, top: c.t - half,
-              width: handleSize, height: handleSize,
-              background: C.brass,
-              border: `2px solid ${C.parchment}`,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-            }} />
+              left: c.l - half,
+              top: c.t - half,
+              width: handleSize,
+              height: handleSize,
+            }}
+          />
         ))}
       </>
     );
   };
 
-  const renderAlphabetPanel = (onPick) => (
+  const renderSidebarContent = (onPick) => (
     <>
-      <div className="p-4 text-center" style={{ borderBottom: `1px solid ${C.brass}55` }}>
-        <Feather size={24} className="mx-auto mb-1" style={{ color: C.brass }} />
-        <h1 className="text-xl font-bold tracking-widest uppercase" style={{ color: C.ink }}>Inkly</h1>
-        <p className="text-xs italic truncate" style={{ color: C.brassDark }}>{session?.user?.email}</p>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-1">
-        <h3 className="text-xs uppercase tracking-widest font-bold mb-2 pl-1" style={{ color: C.brassDark }}>Views</h3>
-        <button onClick={() => { setActiveView('editor'); onPick?.(); }}
-          className="w-full text-left px-3 py-2 rounded flex items-center gap-2"
-          style={activeView === 'editor' ? { background: C.brass, color: C.parchment, fontWeight: 600 } : { color: C.ink }}>
-          <Edit3 size={16} /> Letter Editor
-        </button>
-        <button onClick={() => { setActiveView('notebook'); onPick?.(); }}
-          className="w-full text-left px-3 py-2 rounded flex items-center gap-2"
-          style={activeView === 'notebook' ? { background: C.brass, color: C.parchment, fontWeight: 600 } : { color: C.ink }}>
-          <BookOpen size={16} /> Notebook
-        </button>
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500 mb-2 px-2">
+            Workspace
+          </p>
+          <div className="space-y-1">
+            <button
+              onClick={() => {
+                setActiveView('editor');
+                onPick?.();
+              }}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-base ${
+                activeView === 'editor'
+                  ? 'bg-brand-50 text-brand-700'
+                  : 'text-ink-700 hover:bg-ink-50'
+              }`}
+            >
+              <Edit3 size={16} />
+              <span>Letter Editor</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveView('notebook');
+                onPick?.();
+              }}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-base ${
+                activeView === 'notebook'
+                  ? 'bg-brand-50 text-brand-700'
+                  : 'text-ink-700 hover:bg-ink-50'
+              }`}
+            >
+              <BookOpen size={16} />
+              <span>Notebook</span>
+            </button>
+          </div>
+        </div>
+
         {Object.entries(CATEGORIES).map(([key, cat]) => (
           <div key={key}>
-            <div className="flex items-center justify-between mt-5 mb-2 pl-1">
-              <h3 className="text-xs uppercase tracking-widest font-bold" style={{ color: C.brassDark }}>
+            <div className="flex items-center justify-between mb-2 px-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500">
                 {cat.label}
-              </h3>
-              <span className="text-xs italic" style={{ color: C.inkSoft }}>{counts[key]}/{cat.chars.length}</span>
+              </p>
+              <span className="text-[10px] font-medium text-ink-400">
+                {counts[key]}/{cat.chars.length}
+              </span>
             </div>
-            <div className="grid grid-cols-4 gap-1">
-              {cat.chars.map(letter => {
+            <div className="grid grid-cols-5 gap-1">
+              {cat.chars.map((letter) => {
                 const drawn = !!customAlphabet[letter];
                 const active = activeLetter === letter;
                 return (
-                  <button key={letter}
-                    onClick={() => { pickLetter(letter); onPick?.(); }}
-                    className="relative h-9 rounded text-sm font-bold flex items-center justify-center"
-                    style={active
-                      ? { background: C.brass, color: C.parchment }
-                      : { background: drawn ? 'rgba(181,166,66,0.2)' : 'transparent', color: C.ink, border: `1px solid ${C.brass}55` }}>
+                  <button
+                    key={letter}
+                    onClick={() => {
+                      pickLetter(letter);
+                      onPick?.();
+                    }}
+                    className={`relative h-8 rounded-md text-xs font-semibold transition-base ${
+                      active
+                        ? 'bg-brand-600 text-white shadow-card'
+                        : drawn
+                        ? 'bg-brand-50 text-brand-700 hover:bg-brand-100'
+                        : 'text-ink-600 hover:bg-ink-100'
+                    }`}
+                  >
                     {letter}
-                    {drawn && !active && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full" style={{ background: C.brass }} />}
                   </button>
                 );
               })}
@@ -782,51 +967,119 @@ export default function VintageCalligraphyApp({ session }) {
           </div>
         ))}
       </div>
-      <div className="p-3 space-y-2" style={{ borderTop: `1px solid ${C.brass}55` }}>
-        <button onClick={() => { exportSheet(); onPick?.(); }}
-          className="w-full py-2.5 rounded font-semibold shadow-md flex items-center justify-center gap-2"
-          style={{ background: C.brass, color: C.parchment }}>
-          <Download size={16} /> Export Alphabet
-        </button>
-        <button onClick={handleSignOut}
-          className="w-full py-2 rounded text-xs flex items-center justify-center gap-1.5"
-          style={{ border: `1px solid ${C.brass}55`, color: C.inkSoft }}>
-          <LogOut size={12} /> Sign out
+      <div className="p-4 border-t border-ink-200">
+        <button
+          onClick={() => {
+            exportSheet();
+            onPick?.();
+          }}
+          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-ink-950 text-white text-sm font-medium hover:bg-ink-800 shadow-card transition-base"
+        >
+          <Download size={14} />
+          <span>Export alphabet</span>
         </button>
       </div>
     </>
   );
 
+  const renderUserMenu = () => (
+    <div className="relative" ref={userMenuRef}>
+      <button
+        onClick={() => setUserMenuOpen((v) => !v)}
+        className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-ink-100 transition-base"
+      >
+        <div className="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold">
+          {(session?.user?.email || '?').charAt(0).toUpperCase()}
+        </div>
+        <span className="hidden sm:inline text-sm font-medium text-ink-700 max-w-[140px] truncate">
+          {session?.user?.email}
+        </span>
+      </button>
+      {userMenuOpen && (
+        <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-ink-200 rounded-xl shadow-floating overflow-hidden z-50 animate-fade-in">
+          <div className="px-4 py-3 border-b border-ink-100">
+            <p className="text-xs text-ink-500">Signed in as</p>
+            <p className="text-sm font-medium text-ink-950 truncate">
+              {session?.user?.email}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              navigate('/');
+              setUserMenuOpen(false);
+            }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 transition-base text-left"
+          >
+            <Home size={14} />
+            <span>Marketing site</span>
+          </button>
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-base text-left"
+          >
+            <LogOut size={14} />
+            <span>Sign out</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderTopBar = () => (
+    <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-ink-200">
+      <div className="flex items-center justify-between h-14 px-4 lg:px-6">
+        <div className="flex items-center gap-3 lg:gap-4">
+          {isMobile && (
+            <button
+              onClick={() => setDrawerOpen(true)}
+              className="p-1.5 -ml-1.5 rounded-lg hover:bg-ink-100 transition-base"
+              aria-label="Open menu"
+            >
+              <Menu size={18} />
+            </button>
+          )}
+          <Logo size="sm" linkTo={null} />
+          <div className="hidden md:flex items-center gap-1.5 text-sm text-ink-400">
+            <span>/</span>
+            <span className="text-ink-700 font-medium">Workspace</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden md:inline-flex items-center px-2.5 py-1 rounded-md bg-brand-50 text-brand-700 text-xs font-semibold">
+            {completedCount}/{ALL_CHARS.length}
+          </span>
+          {renderUserMenu()}
+        </div>
+      </div>
+    </header>
+  );
+
   const renderTextareaPane = (size = 'desktop') => {
     const isM = size === 'mobile';
     return (
-      <div className="relative h-full flex flex-col">
+      <div className="h-full flex flex-col gap-2">
         <textarea
           ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           spellCheck="false"
           placeholder="Begin writing here…"
-          className="flex-1 w-full resize-none outline-none"
+          className="flex-1 w-full resize-none outline-none rounded-xl border border-ink-200 bg-white text-ink-900 hover:border-ink-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-base"
           style={{
-            background: C.notebook,
-            color: C.ink,
-            borderLeft: `${isM ? 3 : 4}px solid ${C.brass}`,
-            borderRadius: '4px',
-            padding: isM ? '12px' : '32px',
-            fontFamily: 'Georgia, serif',
-            fontSize: isM ? '15px' : '18px',
-            lineHeight: isM ? '24px' : '32px',
-            backgroundImage: `linear-gradient(transparent 0px, transparent ${isM ? 23 : 31}px, rgba(181, 166, 66, 0.3) ${isM ? 24 : 32}px)`,
-            backgroundSize: `100% ${isM ? 24 : 32}px`,
-            backgroundAttachment: 'local',
-            boxShadow: 'inset 0 0 12px rgba(59,47,47,0.05)',
+            padding: isM ? '14px' : '24px',
+            fontSize: isM ? '15px' : '16px',
+            lineHeight: isM ? '24px' : '26px',
           }}
         />
-        <div className="mt-1.5 flex items-center justify-between text-[11px] italic" style={{ color: C.inkSoft }}>
-          <span>{text.length} chars · {text.split(/\s+/).filter(Boolean).length} words</span>
+        <div className="flex items-center justify-between text-xs text-ink-500 px-1">
+          <span>
+            {text.length} chars · {text.split(/\s+/).filter(Boolean).length} words
+          </span>
           {text.length > 0 && (
-            <button onClick={() => setText('')} className="underline" style={{ color: C.brassDark }}>
+            <button
+              onClick={() => setText('')}
+              className="text-ink-500 hover:text-ink-900 underline transition-base"
+            >
               Clear text
             </button>
           )}
@@ -838,8 +1091,8 @@ export default function VintageCalligraphyApp({ session }) {
   const renderPreviewPane = (size = 'desktop') => {
     const isM = size === 'mobile';
     return (
-      <div className="h-full flex flex-col">
-        <div className="flex-1 min-h-0 relative">
+      <div className="h-full flex flex-col gap-2">
+        <div className="flex-1 min-h-0">
           <CalligraphyCanvas
             text={text}
             customAlphabet={customAlphabet}
@@ -848,174 +1101,237 @@ export default function VintageCalligraphyApp({ session }) {
             lineSpacing={isM ? 8 : 14}
           />
         </div>
-        <div className="mt-1.5 text-[11px] italic text-center" style={{ color: C.inkSoft }}>
+        <p className="text-xs text-ink-500 text-center">
           {completedCount === 0
-            ? 'No glyphs drawn — open Editor.'
-            : `${counts.uppercase}/26 · ${counts.lowercase}/26 · ${counts.numbers}/10`}
-        </div>
+            ? 'Draw some letters in the editor to see them here.'
+            : `${counts.uppercase}/26 uppercase · ${counts.lowercase}/26 lowercase · ${counts.numbers}/10 numbers`}
+        </p>
       </div>
     );
   };
 
+  const inTransform = editorMode === 'transform';
+
+  // ============ MOBILE LAYOUT ============
   if (isMobile) {
-    const inTransform = editorMode === 'transform';
     return (
-      <div className="flex flex-col font-serif relative overflow-hidden"
+      <div
+        className="flex flex-col bg-ink-50"
         style={{
-          background: C.parchment, color: C.ink,
-          fontFamily: '"Playfair Display", Georgia, serif',
           height: '100dvh',
           paddingTop: 'env(safe-area-inset-top, 0px)',
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        }}>
-        <header className="flex items-center justify-between px-2 py-1.5 z-20 flex-shrink-0"
-          style={{ background: C.parchmentDark, borderBottom: `1px solid ${C.brass}66` }}>
-          <button onClick={() => setDrawerOpen(true)} className="p-1.5 rounded" style={{ color: C.ink }}>
-            <Menu size={20} />
+        }}
+      >
+        {renderTopBar()}
+
+        <div className="flex gap-1 px-3 py-2 bg-white border-b border-ink-200">
+          <button
+            onClick={() => setActiveView('editor')}
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${
+              activeView === 'editor'
+                ? 'bg-brand-600 text-white'
+                : 'text-ink-600 hover:bg-ink-100'
+            }`}
+          >
+            <Edit3 size={12} /> Editor
           </button>
-          <div className="flex items-center gap-1.5">
-            <Feather size={14} style={{ color: C.brass }} />
-            <h1 className="text-xs font-bold tracking-widest uppercase">Inkly</h1>
-          </div>
-          <div className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(181,166,66,0.2)', color: C.brassDark }}>
-            {completedCount}/{ALL_CHARS.length}
-          </div>
-        </header>
-        <div className="flex flex-shrink-0" style={{ background: C.parchmentDark, borderBottom: `1px solid ${C.brass}33` }}>
-          <button onClick={() => setActiveView('editor')}
-            className="flex-1 py-1 text-[11px] font-semibold flex items-center justify-center gap-1"
-            style={activeView === 'editor' ? { background: C.brass, color: C.parchment } : { color: C.inkSoft }}>
-            <Edit3 size={11} /> Editor
-          </button>
-          <button onClick={() => setActiveView('notebook')}
-            className="flex-1 py-1 text-[11px] font-semibold flex items-center justify-center gap-1"
-            style={activeView === 'notebook' ? { background: C.brass, color: C.parchment } : { color: C.inkSoft }}>
-            <BookOpen size={11} /> Notebook
+          <button
+            onClick={() => setActiveView('notebook')}
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${
+              activeView === 'notebook'
+                ? 'bg-brand-600 text-white'
+                : 'text-ink-600 hover:bg-ink-100'
+            }`}
+          >
+            <BookOpen size={12} /> Notebook
           </button>
         </div>
+
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
           {activeView === 'editor' ? (
             <>
-              <div className="flex gap-1 px-2 py-1 flex-shrink-0" style={{ background: C.parchmentDark, borderBottom: `1px solid ${C.brass}22` }}>
+              <div className="flex gap-1 px-3 py-1.5 bg-white border-b border-ink-100">
                 {Object.entries(CATEGORIES).map(([key, cat]) => (
-                  <button key={key} onClick={() => setActiveCategory(key)}
-                    className="flex-1 py-0.5 rounded text-[10px] font-semibold"
-                    style={activeCategory === key
-                      ? { background: 'rgba(181,166,66,0.4)', color: C.ink, border: `1px solid ${C.brass}` }
-                      : { color: C.inkSoft, border: `1px solid ${C.brass}33` }}>
+                  <button
+                    key={key}
+                    onClick={() => setActiveCategory(key)}
+                    className={`flex-1 py-1 rounded-md text-[10px] font-semibold transition-base ${
+                      activeCategory === key
+                        ? 'bg-brand-50 text-brand-700 border border-brand-200'
+                        : 'text-ink-500 border border-transparent hover:bg-ink-50'
+                    }`}
+                  >
                     {cat.short} · {counts[key]}/{cat.chars.length}
                   </button>
                 ))}
               </div>
-              <div className="overflow-x-auto py-1 px-1.5 flex-shrink-0"
-                style={{ background: C.parchmentDark, borderBottom: `1px solid ${C.brass}33`, WebkitOverflowScrolling: 'touch' }}>
+
+              <div className="overflow-x-auto py-2 px-2 bg-white border-b border-ink-100">
                 <div className="flex gap-1 w-max">
-                  {CATEGORIES[activeCategory].chars.map(letter => {
+                  {CATEGORIES[activeCategory].chars.map((letter) => {
                     const drawn = !!customAlphabet[letter];
                     const active = activeLetter === letter;
                     return (
-                      <button key={letter} onClick={() => setActiveLetter(letter)}
-                        className="relative w-8 h-8 rounded font-bold text-xs flex-shrink-0"
-                        style={active
-                          ? { background: C.brass, color: C.parchment }
-                          : { background: drawn ? 'rgba(181,166,66,0.2)' : 'transparent', color: C.ink, border: `1px solid ${C.brass}55` }}>
+                      <button
+                        key={letter}
+                        onClick={() => setActiveLetter(letter)}
+                        className={`w-8 h-8 rounded-md text-xs font-semibold transition-base flex-shrink-0 ${
+                          active
+                            ? 'bg-brand-600 text-white shadow-card'
+                            : drawn
+                            ? 'bg-brand-50 text-brand-700'
+                            : 'text-ink-600 border border-ink-200'
+                        }`}
+                      >
                         {letter}
-                        {drawn && !active && (
-                          <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full" style={{ background: C.brass }} />
-                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
-              <div className="flex-1 min-h-0 flex flex-col p-2 gap-1.5">
+
+              <div className="flex-1 min-h-0 flex flex-col p-3 gap-2">
                 <div className="flex items-center justify-between flex-shrink-0">
-                  <button onClick={goToPrevLetter} className="p-1 rounded" style={{ color: C.inkSoft }}>
+                  <button
+                    onClick={goToPrevLetter}
+                    className="p-1.5 rounded-md hover:bg-ink-100 transition-base text-ink-600"
+                  >
                     <ChevronLeft size={16} />
                   </button>
                   <div className="text-center flex-1">
-                    <div className="text-base leading-none">
-                      <span className="italic text-xs" style={{ color: C.inkSoft }}>{CATEGORIES[activeCategory].label.charAt(0)}</span>{' '}
-                      <span className="font-bold text-xl" style={{ color: C.brass }}>{activeLetter}</span>
-                      {savedFlash && <Check size={12} className="inline ml-1.5" style={{ color: C.brass }} />}
-                      {!savedFlash && customAlphabet[activeLetter] && <span className="ml-1.5 w-1.5 h-1.5 inline-block rounded-full align-middle" style={{ background: C.brass }} />}
+                    <div className="text-sm leading-none">
+                      <span className="text-xs text-ink-500">
+                        {CATEGORIES[activeCategory].label}
+                      </span>
+                      <span className="ml-2 font-bold text-lg text-brand-600">
+                        {activeLetter}
+                      </span>
+                      {savedFlash && (
+                        <Check size={12} className="inline ml-2 text-brand-600" />
+                      )}
                     </div>
-                    <div className="text-[10px] italic" style={{ color: inTransform ? C.brass : C.inkSoft }}>
-                      {inTransform ? 'Drag corners to scale · drag center to move' : drawingHint()}
-                    </div>
+                    <p className="text-[10px] text-ink-500 mt-0.5">
+                      {inTransform
+                        ? 'Drag corners to scale · drag center to move'
+                        : drawingHint()}
+                    </p>
                   </div>
-                  <button onClick={goToNextLetter} className="p-1 rounded" style={{ color: C.inkSoft }}>
+                  <button
+                    onClick={goToNextLetter}
+                    className="p-1.5 rounded-md hover:bg-ink-100 transition-base text-ink-600"
+                  >
                     <ChevronRight size={16} />
                   </button>
                 </div>
-                <div ref={wrapRef}
-                  className="flex-1 w-full rounded relative overflow-hidden"
-                  style={{ background: C.parchmentLight, border: `1px solid ${C.brass}55`, minHeight: 0, touchAction: 'none' }}>
-                  {!inTransform && renderEditorGuides(activeCategory, true)}
-                  <canvas ref={canvasRef}
+
+                <div
+                  ref={wrapRef}
+                  className="flex-1 w-full rounded-xl relative overflow-hidden bg-white border border-ink-200"
+                  style={{ minHeight: 0, touchAction: 'none' }}
+                >
+                  {!inTransform && renderEditorGuides(activeCategory)}
+                  <canvas
+                    ref={canvasRef}
                     className="absolute inset-0 touch-none"
-                    onMouseDown={onCanvasDown} onMouseMove={onCanvasMove} onMouseUp={onCanvasUp} onMouseLeave={onCanvasUp}
-                    onTouchStart={onCanvasDown} onTouchMove={onCanvasMove} onTouchEnd={onCanvasUp} />
+                    onMouseDown={onCanvasDown}
+                    onMouseMove={onCanvasMove}
+                    onMouseUp={onCanvasUp}
+                    onMouseLeave={onCanvasUp}
+                    onTouchStart={onCanvasDown}
+                    onTouchMove={onCanvasMove}
+                    onTouchEnd={onCanvasUp}
+                  />
                   {renderTransformOverlay()}
                 </div>
+
                 <div className="flex-shrink-0">
                   {showSliders && !inTransform && (
-                    <div className="p-2 mb-1.5 rounded text-xs" style={{ background: C.parchmentDark, border: `1px solid ${C.brass}55` }}>
+                    <div className="p-3 mb-2 rounded-xl bg-white border border-ink-200">
                       <div className="flex gap-3">
                         <div className="flex-1">
-                          <div className="flex justify-between mb-0.5">
-                            <span className="uppercase tracking-wider font-semibold text-[10px]">Nib</span>
-                            <span className="text-[10px]" style={{ color: C.brass }}>{baseThickness}</span>
+                          <div className="flex justify-between mb-1">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">
+                              Nib
+                            </span>
+                            <span className="text-[10px] font-semibold text-brand-600">
+                              {baseThickness}
+                            </span>
                           </div>
-                          <input type="range" min="2" max="30" value={baseThickness}
+                          <input
+                            type="range"
+                            min="2"
+                            max="30"
+                            value={baseThickness}
                             onChange={(e) => setBaseThickness(Number(e.target.value))}
-                            className="w-full h-4" style={{ accentColor: C.brass }} />
+                            className="w-full accent-brand-600"
+                          />
                         </div>
                         <div className="flex-1">
-                          <div className="flex justify-between mb-0.5">
-                            <span className="uppercase tracking-wider font-semibold text-[10px]">Ink</span>
-                            <span className="text-[10px]" style={{ color: C.brass }}>{Math.round(opacity * 100)}%</span>
+                          <div className="flex justify-between mb-1">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">
+                              Ink
+                            </span>
+                            <span className="text-[10px] font-semibold text-brand-600">
+                              {Math.round(opacity * 100)}%
+                            </span>
                           </div>
-                          <input type="range" min="0.2" max="1" step="0.05" value={opacity}
+                          <input
+                            type="range"
+                            min="0.2"
+                            max="1"
+                            step="0.05"
+                            value={opacity}
                             onChange={(e) => setOpacity(Number(e.target.value))}
-                            className="w-full h-4" style={{ accentColor: C.brass }} />
+                            className="w-full accent-brand-600"
+                          />
                         </div>
                       </div>
                     </div>
                   )}
+
                   {inTransform ? (
-                    <div className="flex gap-1">
-                      <button onClick={exitTransformMode}
-                        className="flex-1 py-2.5 rounded font-semibold flex items-center justify-center gap-1.5 shadow"
-                        style={{ background: C.brass, color: C.parchment }}>
-                        <Check size={14} /> Done — Apply Size
-                      </button>
-                    </div>
+                    <button
+                      onClick={exitTransformMode}
+                      className="w-full py-2.5 rounded-lg font-semibold text-sm bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base inline-flex items-center justify-center gap-2"
+                    >
+                      <Check size={14} /> Done — Apply Size
+                    </button>
                   ) : (
-                    <div className="flex gap-1">
-                      <button onClick={() => setShowSliders(s => !s)}
-                        className="py-2 px-2.5 rounded text-[10px] font-semibold"
-                        style={{ border: `1px solid ${C.brass}88`, color: C.ink, background: showSliders ? 'rgba(181,166,66,0.15)' : 'transparent' }}>
-                        ⚙
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => setShowSliders((s) => !s)}
+                        className={`py-2 px-2.5 rounded-lg border border-ink-200 transition-base ${
+                          showSliders ? 'bg-ink-100' : 'bg-white hover:bg-ink-50'
+                        }`}
+                      >
+                        <Settings size={14} className="text-ink-600" />
                       </button>
-                      <button onClick={clearCanvas}
-                        className="py-2 px-2 rounded flex items-center justify-center text-[11px]"
-                        style={{ border: `1px solid ${C.brass}88`, color: C.ink }}>
-                        <Trash2 size={12} />
+                      <button
+                        onClick={clearCanvas}
+                        className="py-2 px-2.5 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 transition-base"
+                      >
+                        <Trash2 size={14} className="text-ink-600" />
                       </button>
-                      <button onClick={enterTransformMode}
-                        className="flex-1 py-2 rounded flex items-center justify-center gap-1 text-[11px] font-semibold"
-                        style={{ border: `1px solid ${C.brass}88`, color: C.ink, background: 'rgba(181,166,66,0.1)' }}>
+                      <button
+                        onClick={enterTransformMode}
+                        className="flex-1 py-2 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 transition-base inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-ink-700"
+                      >
                         <Maximize2 size={12} /> Resize
                       </button>
-                      <button onClick={saveLetter}
-                        className="flex-1 py-2 rounded font-semibold flex items-center justify-center gap-1 text-[11px] shadow"
-                        style={{ background: C.brass, color: C.parchment }}>
+                      <button
+                        onClick={saveLetter}
+                        className="flex-1 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base inline-flex items-center justify-center gap-1.5 text-xs font-semibold"
+                      >
                         <Save size={12} /> Save
                       </button>
-                      <button onClick={() => { saveLetter(); setTimeout(goToNextLetter, 200); }}
-                        className="py-2 px-2.5 rounded"
-                        style={{ background: C.brassDark, color: C.parchment }}>
+                      <button
+                        onClick={() => {
+                          saveLetter();
+                          setTimeout(goToNextLetter, 200);
+                        }}
+                        className="py-2 px-2.5 rounded-lg bg-ink-950 text-white hover:bg-ink-800 transition-base"
+                      >
                         <ChevronRight size={14} />
                       </button>
                     </div>
@@ -1024,42 +1340,61 @@ export default function VintageCalligraphyApp({ session }) {
               </div>
             </>
           ) : (
-            <div className="flex-1 min-h-0 flex flex-col p-2 gap-1.5">
+            <div className="flex-1 min-h-0 flex flex-col p-3 gap-2">
               <div className="flex gap-1 flex-shrink-0">
-                <button onClick={() => setNotebookMode('write')}
-                  className="flex-1 py-1.5 rounded text-[11px] font-semibold flex items-center justify-center gap-1"
-                  style={notebookMode === 'write' ? { background: C.brass, color: C.parchment } : { color: C.inkSoft, border: `1px solid ${C.brass}55` }}>
-                  <PenLine size={11} /> Write
+                <button
+                  onClick={() => setNotebookMode('write')}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-base inline-flex items-center justify-center gap-1.5 ${
+                    notebookMode === 'write'
+                      ? 'bg-brand-600 text-white'
+                      : 'text-ink-600 border border-ink-200 bg-white'
+                  }`}
+                >
+                  <PenLine size={12} /> Write
                 </button>
-                <button onClick={() => setNotebookMode('preview')}
-                  className="flex-1 py-1.5 rounded text-[11px] font-semibold flex items-center justify-center gap-1"
-                  style={notebookMode === 'preview' ? { background: C.brass, color: C.parchment } : { color: C.inkSoft, border: `1px solid ${C.brass}55` }}>
-                  <Eye size={11} /> Preview
+                <button
+                  onClick={() => setNotebookMode('preview')}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-base inline-flex items-center justify-center gap-1.5 ${
+                    notebookMode === 'preview'
+                      ? 'bg-brand-600 text-white'
+                      : 'text-ink-600 border border-ink-200 bg-white'
+                  }`}
+                >
+                  <Eye size={12} /> Preview
                 </button>
               </div>
               <div className="flex-1 min-h-0">
-                {notebookMode === 'write' ? renderTextareaPane('mobile') : renderPreviewPane('mobile')}
+                {notebookMode === 'write'
+                  ? renderTextareaPane('mobile')
+                  : renderPreviewPane('mobile')}
               </div>
             </div>
           )}
         </main>
+
         {drawerOpen && (
-          <div className="fixed inset-0 z-30" onClick={() => setDrawerOpen(false)}
-            style={{ background: 'rgba(0,0,0,0.5)' }}>
-            <div className="absolute left-0 top-0 bottom-0 flex flex-col shadow-2xl"
+          <div
+            className="fixed inset-0 z-40 bg-ink-950/50 backdrop-blur-sm"
+            onClick={() => setDrawerOpen(false)}
+          >
+            <div
+              className="absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-floating"
+              onClick={(e) => e.stopPropagation()}
               style={{
-                background: C.parchmentDark,
-                width: 'min(280px, 80vw)',
                 paddingTop: 'env(safe-area-inset-top, 0px)',
                 paddingBottom: 'env(safe-area-inset-bottom, 0px)',
               }}
-              onClick={(e) => e.stopPropagation()}>
-              <button onClick={() => setDrawerOpen(false)}
-                className="absolute top-2 right-2 p-1.5 rounded z-10"
-                style={{ color: C.inkSoft }}>
-                <X size={18} />
-              </button>
-              {renderAlphabetPanel(() => setDrawerOpen(false))}
+            >
+              <div className="flex items-center justify-between p-4 border-b border-ink-200">
+                <Logo size="sm" linkTo={null} />
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-ink-100 text-ink-600"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              {renderSidebarContent(() => setDrawerOpen(false))}
             </div>
           </div>
         )}
@@ -1067,130 +1402,189 @@ export default function VintageCalligraphyApp({ session }) {
     );
   }
 
-  const inTransform = editorMode === 'transform';
+  // ============ DESKTOP LAYOUT ============
   return (
-    <div className="flex h-screen overflow-hidden font-serif" style={{ background: C.parchment, color: C.ink, fontFamily: '"Playfair Display", Georgia, serif' }}>
-      <aside className="w-72 flex flex-col shadow-2xl z-10" style={{ background: C.parchmentDark, borderRight: `1px solid ${C.brass}66` }}>
-        {renderAlphabetPanel()}
-      </aside>
-      <main className="flex-1 p-6 relative overflow-hidden">
-        <Sparkles size={24} className="absolute top-4 right-6 opacity-30" style={{ color: C.brass }} />
-        {activeView === 'editor' ? (
-          <div className="h-full max-w-5xl mx-auto flex flex-col gap-4 p-6 rounded-lg shadow-inner"
-            style={{ border: `2px dashed ${C.brass}66`, background: C.parchment }}>
-            <div className="flex justify-between items-end pb-2" style={{ borderBottom: `1px solid ${C.brass}55` }}>
-              <div>
-                <h2 className="text-3xl italic">
-                  {CATEGORIES[activeCategory].label}:{' '}
-                  <span className="font-bold not-italic" style={{ color: C.brass }}>{activeLetter}</span>
-                </h2>
-                <p className="text-xs italic mt-1" style={{ color: inTransform ? C.brass : C.inkSoft }}>
-                  {inTransform ? 'Drag corner handles to resize · drag the box to reposition' : drawingHint()}
-                </p>
+    <div className="flex flex-col h-screen bg-ink-50">
+      {renderTopBar()}
+
+      <div className="flex-1 min-h-0 flex">
+        <aside className="w-72 flex-shrink-0 flex flex-col bg-white border-r border-ink-200">
+          {renderSidebarContent()}
+        </aside>
+
+        <main className="flex-1 min-h-0 p-6 lg:p-8 overflow-auto">
+          {activeView === 'editor' ? (
+            <div className="max-w-5xl mx-auto h-full flex flex-col gap-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-brand-600 mb-1">
+                    {CATEGORIES[activeCategory].label}
+                  </p>
+                  <h1 className="text-3xl font-bold text-ink-950 tracking-tight">
+                    Letter <span className="text-brand-600">{activeLetter}</span>
+                  </h1>
+                  <p className="text-sm text-ink-500 mt-1">
+                    {inTransform
+                      ? 'Drag corner handles to resize · drag the box to reposition'
+                      : drawingHint()}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {savedFlash && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-brand-50 text-brand-700 text-xs font-semibold">
+                      <Check size={12} /> Saved
+                    </span>
+                  )}
+                  {customAlphabet[activeLetter] && !savedFlash && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-ink-100 text-ink-600 text-xs font-medium">
+                      In your alphabet
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                {savedFlash && <span className="text-sm italic flex items-center gap-1" style={{ color: C.brass }}><Check size={14} /> Inscribed</span>}
-                {customAlphabet[activeLetter] && !savedFlash && <span className="text-sm italic" style={{ color: C.inkSoft }}>Saved in notebook</span>}
+
+              <div
+                ref={wrapRef}
+                className="flex-1 w-full rounded-2xl bg-white border border-ink-200 shadow-card relative overflow-hidden"
+                style={{ cursor: inTransform ? 'move' : 'crosshair' }}
+              >
+                {!inTransform && renderEditorGuides(activeCategory)}
+                <canvas
+                  ref={canvasRef}
+                  className="absolute inset-0 touch-none"
+                  onMouseDown={onCanvasDown}
+                  onMouseMove={onCanvasMove}
+                  onMouseUp={onCanvasUp}
+                  onMouseLeave={onCanvasUp}
+                  onTouchStart={onCanvasDown}
+                  onTouchMove={onCanvasMove}
+                  onTouchEnd={onCanvasUp}
+                />
+                {renderTransformOverlay()}
               </div>
-            </div>
-            <div ref={wrapRef}
-              className="flex-1 w-full rounded shadow-sm relative overflow-hidden"
-              style={{ background: C.parchmentLight, border: `1px solid ${C.brass}55`, cursor: inTransform ? 'move' : 'crosshair' }}>
-              {!inTransform && renderEditorGuides(activeCategory)}
-              <canvas ref={canvasRef}
-                className="absolute inset-0 touch-none"
-                onMouseDown={onCanvasDown} onMouseMove={onCanvasMove} onMouseUp={onCanvasUp} onMouseLeave={onCanvasUp}
-                onTouchStart={onCanvasDown} onTouchMove={onCanvasMove} onTouchEnd={onCanvasUp} />
-              {renderTransformOverlay()}
-            </div>
-            <div className="p-4 rounded shadow-sm flex flex-wrap gap-6 items-center"
-              style={{ background: C.parchmentDark, border: `1px solid ${C.brass}55` }}>
-              {!inTransform && (
-                <>
-                  <div className="flex-1 min-w-48 flex flex-col gap-1">
-                    <label className="text-xs uppercase tracking-widest font-semibold flex justify-between">
-                      <span>Nib Thickness</span><span style={{ color: C.brass }}>{baseThickness}px</span>
-                    </label>
-                    <input type="range" min="2" max="40" value={baseThickness}
-                      onChange={(e) => setBaseThickness(Number(e.target.value))}
-                      style={{ accentColor: C.brass }} />
-                  </div>
-                  <div className="flex-1 min-w-48 flex flex-col gap-1">
-                    <label className="text-xs uppercase tracking-widest font-semibold flex justify-between">
-                      <span>Ink Opacity</span><span style={{ color: C.brass }}>{Math.round(opacity * 100)}%</span>
-                    </label>
-                    <input type="range" min="0.2" max="1" step="0.05" value={opacity}
-                      onChange={(e) => setOpacity(Number(e.target.value))}
-                      style={{ accentColor: C.brass }} />
-                  </div>
-                </>
-              )}
-              <div className="flex gap-2 ml-auto">
-                {inTransform ? (
-                  <button onClick={exitTransformMode}
-                    className="px-6 py-2 rounded font-semibold shadow-md flex items-center gap-1.5 hover:opacity-90"
-                    style={{ background: C.brass, color: C.parchment }}>
-                    <Check size={14} /> Done — Apply Size
-                  </button>
-                ) : (
+
+              <div className="p-4 rounded-2xl bg-white border border-ink-200 flex flex-wrap items-center gap-6">
+                {!inTransform && (
                   <>
-                    <button onClick={clearCanvas}
-                      className="px-4 py-2 rounded flex items-center gap-1.5 hover:opacity-80"
-                      style={{ border: `1px solid ${C.brass}88`, color: C.ink }}>
-                      <Trash2 size={14} /> Clear
-                    </button>
-                    {customAlphabet[activeLetter] && (
-                      <button onClick={eraseLetter}
-                        className="px-4 py-2 rounded flex items-center gap-1.5 hover:opacity-80"
-                        style={{ border: `1px solid #a0524066`, color: '#80322f' }}>
-                        Erase
-                      </button>
-                    )}
-                    <button onClick={enterTransformMode}
-                      className="px-4 py-2 rounded flex items-center gap-1.5 hover:opacity-80"
-                      style={{ border: `1px solid ${C.brass}88`, color: C.ink, background: 'rgba(181,166,66,0.1)' }}>
-                      <Maximize2 size={14} /> Resize
-                    </button>
-                    <button onClick={saveLetter}
-                      className="px-5 py-2 rounded font-semibold shadow-md flex items-center gap-1.5 hover:opacity-90"
-                      style={{ background: C.brass, color: C.parchment }}>
-                      <Save size={14} /> Save Ink
-                    </button>
-                    <button onClick={() => { saveLetter(); setTimeout(goToNextLetter, 200); }}
-                      className="px-3 py-2 rounded hover:opacity-80"
-                      style={{ border: `1px solid ${C.brass}88`, color: C.ink }} title="Save and advance">
-                      →
-                    </button>
+                    <div className="flex-1 min-w-[180px]">
+                      <div className="flex justify-between mb-1.5">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-ink-600">
+                          Nib thickness
+                        </span>
+                        <span className="text-xs font-bold text-brand-600">
+                          {baseThickness}px
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="2"
+                        max="40"
+                        value={baseThickness}
+                        onChange={(e) => setBaseThickness(Number(e.target.value))}
+                        className="w-full accent-brand-600"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-[180px]">
+                      <div className="flex justify-between mb-1.5">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-ink-600">
+                          Ink opacity
+                        </span>
+                        <span className="text-xs font-bold text-brand-600">
+                          {Math.round(opacity * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.2"
+                        max="1"
+                        step="0.05"
+                        value={opacity}
+                        onChange={(e) => setOpacity(Number(e.target.value))}
+                        className="w-full accent-brand-600"
+                      />
+                    </div>
                   </>
                 )}
+
+                <div className="flex items-center gap-2 ml-auto">
+                  {inTransform ? (
+                    <button
+                      onClick={exitTransformMode}
+                      className="inline-flex items-center gap-1.5 px-5 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base text-sm font-semibold"
+                    >
+                      <Check size={14} /> Done — Apply Size
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={clearCanvas}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-ink-200 hover:bg-ink-50 transition-base text-sm font-medium text-ink-700"
+                      >
+                        <Trash2 size={14} /> Clear
+                      </button>
+                      {customAlphabet[activeLetter] && (
+                        <button
+                          onClick={eraseLetter}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-red-200 hover:bg-red-50 transition-base text-sm font-medium text-red-700"
+                        >
+                          Erase
+                        </button>
+                      )}
+                      <button
+                        onClick={enterTransformMode}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-ink-200 hover:bg-ink-50 transition-base text-sm font-medium text-ink-700"
+                      >
+                        <Maximize2 size={14} /> Resize
+                      </button>
+                      <button
+                        onClick={saveLetter}
+                        className="inline-flex items-center gap-1.5 px-5 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base text-sm font-semibold"
+                      >
+                        <Save size={14} /> Save
+                      </button>
+                      <button
+                        onClick={() => {
+                          saveLetter();
+                          setTimeout(goToNextLetter, 200);
+                        }}
+                        title="Save and advance"
+                        className="inline-flex items-center px-3 py-2 rounded-lg bg-ink-950 text-white hover:bg-ink-800 transition-base"
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="h-full max-w-6xl mx-auto flex flex-col p-6">
-            <h2 className="text-3xl italic mb-4 pb-2" style={{ borderBottom: `1px solid ${C.brass}55` }}>
-              Your Notebook
-              <span className="text-sm not-italic ml-3" style={{ color: C.inkSoft }}>
-                — write on the left, see it flow on the right
-              </span>
-            </h2>
-            <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
-              <div className="flex flex-col">
-                <div className="text-xs uppercase tracking-widest font-bold mb-2 flex items-center gap-1.5" style={{ color: C.brassDark }}>
-                  <PenLine size={12} /> Write
-                </div>
-                <div className="flex-1 min-h-0">{renderTextareaPane('desktop')}</div>
+          ) : (
+            <div className="max-w-6xl mx-auto h-full flex flex-col gap-4">
+              <div>
+                <h1 className="text-3xl font-bold text-ink-950 tracking-tight">
+                  Notebook
+                </h1>
+                <p className="text-sm text-ink-500 mt-1">
+                  Write on the left — your custom letters appear on the right.
+                </p>
               </div>
-              <div className="flex flex-col">
-                <div className="text-xs uppercase tracking-widest font-bold mb-2 flex items-center gap-1.5" style={{ color: C.brassDark }}>
-                  <Eye size={12} /> Calligraphy Preview
+              <div className="flex-1 min-h-0 grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5">
+                    <PenLine size={12} /> Write
+                  </p>
+                  <div className="flex-1 min-h-0">{renderTextareaPane('desktop')}</div>
                 </div>
-                <div className="flex-1 min-h-0">{renderPreviewPane('desktop')}</div>
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5">
+                    <Eye size={12} /> Calligraphy preview
+                  </p>
+                  <div className="flex-1 min-h-0">{renderPreviewPane('desktop')}</div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </main>
+      </div>
     </div>
   );
 }
