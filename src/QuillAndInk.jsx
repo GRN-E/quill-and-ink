@@ -16,7 +16,6 @@ import {
   Maximize2,
   LogOut,
   Settings,
-  User,
   Home,
 } from 'lucide-react';
 import { supabase } from './supabase';
@@ -45,13 +44,10 @@ const ALL_CHARS = [
   ...CATEGORIES.numbers.chars,
 ];
 
+// Character classification
 const DESCENDERS = 'gjpqy';
 const ASCENDERS = 'bdfhklt';
 const DOTTED = 'ij';
-const X_HEIGHT_RATIO = 0.55;
-const ASCENDER_RATIO = 0.92;
-const DESCENDER_BODY_RATIO = 0.55;
-const DESCENDER_TAIL_RATIO = 0.25;
 
 const classifyChar = (ch) => {
   if (ch >= 'A' && ch <= 'Z') return 'cap';
@@ -64,11 +60,48 @@ const classifyChar = (ch) => {
   return 'cap';
 };
 
-const getBodyHeight = (cls) => {
+// =========================================================================
+// CANVAS ZONE LAYOUT
+// The editor canvas is conceptually divided into four bands stacked top-to-bottom.
+// Each band takes a fraction of the canvas height. Together they sum to 1.0.
+// =========================================================================
+const ZONE_LAYOUT = {
+  ascender: 0.20,   // top: extra space above cap line (for b, d, h, k, l, t, i, j only)
+  cap: 0.45,        // cap line down to x-height line (for capitals, numbers, ascender stems)
+  xheight: 0.20,    // x-height line down to baseline (for lowercase bodies)
+  descender: 0.15,  // below baseline (for g, j, p, q, y tails)
+};
+
+// Y-position (fraction of canvas) for each named horizontal line
+const TOP = 0;
+const CAP_LINE = ZONE_LAYOUT.ascender;
+const X_HEIGHT_LINE = CAP_LINE + ZONE_LAYOUT.cap;
+const BASELINE = X_HEIGHT_LINE + ZONE_LAYOUT.xheight;
+const DESCENDER_LINE = BASELINE + ZONE_LAYOUT.descender;
+
+// For each character class, which y-fractions define the captured region on save,
+// and which y-fractions define the "active" (bright) zone for drawing.
+const getCaptureRegion = (cls) => {
+  if (cls === 'cap') return { top: CAP_LINE, bottom: BASELINE };
+  if (cls === 'xheight') return { top: X_HEIGHT_LINE, bottom: BASELINE };
+  if (cls === 'ascender') return { top: TOP, bottom: BASELINE };
+  if (cls === 'descender') return { top: X_HEIGHT_LINE, bottom: DESCENDER_LINE };
+  return { top: CAP_LINE, bottom: BASELINE };
+};
+
+// Relative height each class should render at in the preview, with cap height = 1.0
+const getRenderHeight = (cls) => {
   if (cls === 'cap') return 1.0;
-  if (cls === 'ascender') return ASCENDER_RATIO;
-  if (cls === 'descender') return DESCENDER_BODY_RATIO + DESCENDER_TAIL_RATIO;
-  return X_HEIGHT_RATIO;
+  if (cls === 'xheight') return ZONE_LAYOUT.xheight / ZONE_LAYOUT.cap;
+  if (cls === 'ascender') return (ZONE_LAYOUT.ascender + ZONE_LAYOUT.cap + ZONE_LAYOUT.xheight) / ZONE_LAYOUT.cap;
+  if (cls === 'descender') return (ZONE_LAYOUT.xheight + ZONE_LAYOUT.descender) / ZONE_LAYOUT.cap;
+  return 1.0;
+};
+
+// How much of the rendered glyph drops below the baseline (descender tail)
+const getDescenderDrop = (cls) => {
+  if (cls === 'descender') return ZONE_LAYOUT.descender / ZONE_LAYOUT.cap;
+  return 0;
 };
 
 // ============ CALLIGRAPHY PREVIEW CANVAS ============
@@ -80,8 +113,9 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
 
   useEffect(() => {
     let cancelled = false;
-    Object.entries(customAlphabet).forEach(([ch, src]) => {
-      if (cacheRef.current[src]) return;
+    Object.entries(customAlphabet).forEach(([ch, entry]) => {
+      const src = typeof entry === 'string' ? entry : entry?.src;
+      if (!src || cacheRef.current[src]) return;
       const img = new Image();
       img.onload = () => {
         if (cancelled) return;
@@ -112,19 +146,22 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
 
     const getGlyph = (ch) => {
       const cls = classifyChar(ch);
-      const bodyH = capHeight * getBodyHeight(cls);
-      const drop = cls === 'descender' ? capHeight * DESCENDER_TAIL_RATIO : 0;
-      const src = customAlphabet[ch];
+      const renderH = capHeight * getRenderHeight(cls);
+      const drop = capHeight * getDescenderDrop(cls);
+
+      const entry = customAlphabet[ch];
+      const src = typeof entry === 'string' ? entry : entry?.src;
+
       if (src && cacheRef.current[src]) {
         const img = cacheRef.current[src];
-        const aspectRatio = img.naturalWidth / img.naturalHeight || 1;
-        const w = bodyH * aspectRatio;
-        return { type: 'img', img, w, h: bodyH, drop, ch, cls };
+        const aspect = img.naturalWidth / img.naturalHeight || 1;
+        const w = renderH * aspect;
+        return { type: 'img', img, w, h: renderH, drop, ch, cls };
       }
-      const fontSize = bodyH * 1.1;
+      const fontSize = renderH * 1.05;
       measureCtx.font = `${fontSize}px Georgia, serif`;
       const w = measureCtx.measureText(ch).width;
-      return { type: 'text', ch, w, h: bodyH, drop, fontSize, cls };
+      return { type: 'text', ch, w, h: renderH, drop, fontSize, cls };
     };
 
     const tokens = [];
@@ -232,8 +269,8 @@ const CalligraphyCanvas = ({ text, customAlphabet, capHeight, padding, lineSpaci
           ctx.translate(-(x + g.w / 2), -baselineY);
 
           if (g.type === 'img') {
-            const bottom = baselineY + g.drop;
-            ctx.drawImage(g.img, x, bottom - g.h + wobble, g.w, g.h);
+            const top = baselineY - g.h + g.drop;
+            ctx.drawImage(g.img, x, top + wobble, g.w, g.h);
           } else {
             ctx.font = `${g.fontSize}px Georgia, serif`;
             ctx.fillText(g.ch, x, baselineY + g.drop + wobble);
@@ -304,6 +341,7 @@ export default function VintageCalligraphyApp({ session }) {
   const lastTime = useRef(0);
   const currentWidth = useRef(baseThickness);
 
+  // Load saved alphabet from Supabase
   useEffect(() => {
     if (!session?.user) return;
     let cancelled = false;
@@ -321,6 +359,7 @@ export default function VintageCalligraphyApp({ session }) {
     };
   }, [session?.user?.id]);
 
+  // Debounced save to Supabase
   useEffect(() => {
     if (syncing || !session?.user) return;
     const t = setTimeout(async () => {
@@ -350,7 +389,9 @@ export default function VintageCalligraphyApp({ session }) {
   };
 
   const activeClass = classifyChar(activeLetter);
+  const activeRegion = getCaptureRegion(activeClass);
 
+  // Mobile detection
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 1024);
     check();
@@ -358,12 +399,14 @@ export default function VintageCalligraphyApp({ session }) {
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  // Reset mode when changing letter or view
   useEffect(() => {
     setEditorMode('draw');
     setTransformBox(null);
     transformImageRef.current = null;
   }, [activeLetter, activeView]);
 
+  // Render saved letter onto canvas when letter or view changes
   useEffect(() => {
     if (activeView !== 'editor' || editorMode !== 'draw') return;
     const id = requestAnimationFrame(() => {
@@ -384,15 +427,26 @@ export default function VintageCalligraphyApp({ session }) {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.clearRect(0, 0, w, h);
-      if (customAlphabet[activeLetter]) {
+
+      // Re-render the saved letter back into its zone
+      const entry = customAlphabet[activeLetter];
+      const src = typeof entry === 'string' ? entry : entry?.src;
+      if (src) {
         const img = new Image();
-        img.onload = () => ctx.drawImage(img, 0, 0, w, h);
-        img.src = customAlphabet[activeLetter];
+        img.onload = () => {
+          const region = getCaptureRegion(activeClass);
+          const zoneTop = region.top * h;
+          const zoneBottom = region.bottom * h;
+          const zoneHeight = zoneBottom - zoneTop;
+          ctx.drawImage(img, 0, zoneTop, w, zoneHeight);
+        };
+        img.src = src;
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [activeLetter, activeView, isMobile, showSliders, editorMode, customAlphabet]);
+  }, [activeLetter, activeView, isMobile, showSliders, editorMode, customAlphabet, activeClass]);
 
+  // Render transform-mode resized image
   useEffect(() => {
     if (editorMode !== 'transform' || !transformBox || !transformImageRef.current) return;
     const canvas = canvasRef.current;
@@ -412,7 +466,7 @@ export default function VintageCalligraphyApp({ session }) {
     );
   }, [transformBox, editorMode]);
 
-  // Close user menu when clicking outside
+  // Close user menu on outside click
   useEffect(() => {
     const handler = (e) => {
       if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
@@ -482,6 +536,7 @@ export default function VintageCalligraphyApp({ session }) {
     isDrawing.current = false;
   };
 
+  // Resize / transform mode
   const enterTransformMode = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -490,11 +545,7 @@ export default function VintageCalligraphyApp({ session }) {
     const w = canvas.width;
     const h = canvas.height;
     const data = ctx.getImageData(0, 0, w, h).data;
-    let minX = w,
-      minY = h,
-      maxX = 0,
-      maxY = 0,
-      found = false;
+    let minX = w, minY = h, maxX = 0, maxY = 0, found = false;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (data[(y * w + x) * 4 + 3] > 10) {
@@ -513,9 +564,7 @@ export default function VintageCalligraphyApp({ session }) {
     const tmp = document.createElement('canvas');
     tmp.width = maxX - minX;
     tmp.height = maxY - minY;
-    tmp
-      .getContext('2d')
-      .drawImage(canvas, minX, minY, maxX - minX, maxY - minY, 0, 0, maxX - minX, maxY - minY);
+    tmp.getContext('2d').drawImage(canvas, minX, minY, maxX - minX, maxY - minY, 0, 0, maxX - minX, maxY - minY);
     const img = new Image();
     img.onload = () => {
       transformImageRef.current = img;
@@ -637,46 +686,75 @@ export default function VintageCalligraphyApp({ session }) {
     });
   };
 
+  // SAVE: capture the active zone region instead of the bounding box.
+  // This ensures uppercase A and lowercase a maintain their proper height ratio.
   const saveLetter = () => {
     const src = canvasRef.current;
     const ctx = src.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
     const w = src.width;
     const h = src.height;
+
+    // Capture from the zone the active letter belongs in
+    const region = getCaptureRegion(activeClass);
+    const zoneTopPx = Math.floor(region.top * h);
+    const zoneBottomPx = Math.ceil(region.bottom * h);
+    const zoneHeight = zoneBottomPx - zoneTopPx;
+
+    // Check that something was drawn anywhere on canvas (not just the zone)
     const data = ctx.getImageData(0, 0, w, h).data;
-    let minX = w,
-      minY = h,
-      maxX = 0,
-      maxY = 0,
-      found = false;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (data[(y * w + x) * 4 + 3] > 10) {
-          found = true;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
+    let drewSomething = false;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 10) {
+        drewSomething = true;
+        break;
       }
     }
-    if (!found) {
+    if (!drewSomething) {
       alert('The canvas is empty — draw something first.');
       return;
     }
-    const padX = 2,
-      padY = 2;
+
+    // Find horizontal bounds within the zone (still trim left/right for ink-only width)
+    let minX = w, maxX = 0;
+    for (let y = zoneTopPx; y < zoneBottomPx; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] > 10) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+    }
+    // Some ink may have been drawn outside the zone — include any column with ink
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 10) {
+        const x = Math.floor((i / 4) % w);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+    if (minX >= maxX) {
+      alert('Draw inside the visible drawing area first.');
+      return;
+    }
+
+    // Pad slightly horizontally
+    const padX = Math.round(4 * dpr);
     minX = Math.max(0, minX - padX);
-    minY = Math.max(0, minY - padY);
     maxX = Math.min(w, maxX + padX);
-    maxY = Math.min(h, maxY + padY);
+
     const cw = maxX - minX;
-    const ch = maxY - minY;
+    const ch = zoneHeight;
     const tmp = document.createElement('canvas');
     tmp.width = cw;
     tmp.height = ch;
-    tmp.getContext('2d').drawImage(src, minX, minY, cw, ch, 0, 0, cw, ch);
+    tmp.getContext('2d').drawImage(src, minX, zoneTopPx, cw, ch, 0, 0, cw, ch);
     const dataUrl = tmp.toDataURL('image/png');
-    setCustomAlphabet((prev) => ({ ...prev, [activeLetter]: dataUrl }));
+
+    setCustomAlphabet((prev) => ({
+      ...prev,
+      [activeLetter]: { src: dataUrl, cls: activeClass },
+    }));
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1200);
     if (editorMode === 'transform') exitTransformMode();
@@ -693,16 +771,14 @@ export default function VintageCalligraphyApp({ session }) {
     if (idx > 0) setActiveLetter(list[idx - 1]);
   };
 
+  // Export alphabet sheet as PNG
   const exportSheet = () => {
     if (completedCount === 0) {
       alert('Draw some letters before exporting.');
       return;
     }
-    const cell = 200,
-      cols = 7;
-    const headerH = 90,
-      footerH = 50,
-      sectionH = 40;
+    const cell = 200, cols = 7;
+    const headerH = 90, footerH = 50, sectionH = 40;
     const sections = ['uppercase', 'lowercase', 'numbers'];
     const totalRows = sections.reduce(
       (sum, s) => sum + Math.ceil(CATEGORIES[s].chars.length / cols),
@@ -747,17 +823,11 @@ export default function VintageCalligraphyApp({ session }) {
       ctx.fillStyle = '#4f46e5';
       ctx.font = 'bold 16px Inter, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(
-        `${CATEGORIES[sec].label} · ${counts[sec]}/${chars.length}`,
-        40,
-        yCursor + 24
-      );
+      ctx.fillText(`${CATEGORIES[sec].label} · ${counts[sec]}/${chars.length}`, 40, yCursor + 24);
       yCursor += sectionH;
       chars.forEach((letter, i) => {
-        const col = i % cols,
-          row = Math.floor(i / cols);
-        const x = col * cell,
-          y = row * cell + yCursor;
+        const col = i % cols, row = Math.floor(i / cols);
+        const x = col * cell, y = row * cell + yCursor;
         ctx.strokeStyle = '#e5e5e5';
         ctx.lineWidth = 1;
         ctx.strokeRect(x + 8, y + 8, cell - 16, cell - 16);
@@ -765,20 +835,19 @@ export default function VintageCalligraphyApp({ session }) {
         ctx.font = 'bold 12px Inter, sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(letter, x + 16, y + 26);
-        if (customAlphabet[letter]) {
+        const entry = customAlphabet[letter];
+        const src = typeof entry === 'string' ? entry : entry?.src;
+        if (src) {
           const img = new Image();
           img.onload = () => {
             const inner = cell - 50;
             const ratio = Math.min(inner / img.width, inner / img.height);
-            const dw = img.width * ratio,
-              dh = img.height * ratio;
+            const dw = img.width * ratio, dh = img.height * ratio;
             ctx.drawImage(img, x + (cell - dw) / 2, y + 35 + (inner - dh) / 2, dw, dh);
             if (--pending === 0) finish();
           };
-          img.onerror = () => {
-            if (--pending === 0) finish();
-          };
-          img.src = customAlphabet[letter];
+          img.onerror = () => { if (--pending === 0) finish(); };
+          img.src = src;
         } else {
           ctx.fillStyle = '#d4d4d4';
           ctx.font = '24px Inter, sans-serif';
@@ -792,10 +861,10 @@ export default function VintageCalligraphyApp({ session }) {
   };
 
   const drawingHint = () => {
-    if (activeClass === 'cap') return 'Cap line to baseline';
-    if (activeClass === 'xheight') return 'X-height to baseline (small)';
-    if (activeClass === 'ascender') return 'Body x-height; stem to cap';
-    if (activeClass === 'descender') return 'Body x-height; tail to descender';
+    if (activeClass === 'cap') return 'Draw between the cap line and baseline';
+    if (activeClass === 'xheight') return 'Draw between the x-height line and baseline';
+    if (activeClass === 'ascender') return 'Stem to the cap line, body at x-height to baseline';
+    if (activeClass === 'descender') return 'Body at x-height to baseline, tail to descender line';
     return '';
   };
 
@@ -804,49 +873,95 @@ export default function VintageCalligraphyApp({ session }) {
     navigate('/');
   };
 
-  // ============ SUB-RENDERERS ============
-
-  const renderEditorGuides = (category) => {
-    const CAP = 0.18,
-      XHEIGHT = 0.42,
-      BASE = 0.78,
-      DESC = 0.94;
-    const showXHeight = category === 'lowercase';
+  // =========================================================================
+  // EDITOR ZONE OVERLAY — visible guide lines + dimmed inactive zones
+  // =========================================================================
+  const renderEditorGuides = () => {
+    const region = getCaptureRegion(activeClass);
     return (
       <div className="absolute inset-0 pointer-events-none">
-        <div
-          className="absolute left-0 right-0"
-          style={{ top: `${CAP * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}
-        >
-          <span className="absolute left-3 -top-3 text-[10px] font-medium text-brand-600 bg-white px-1">
-            cap
-          </span>
-        </div>
-        {showXHeight && (
+        {/* Dim the region above the active zone */}
+        {region.top > 0 && (
+          <div
+            className="absolute left-0 right-0 top-0"
+            style={{
+              height: `${region.top * 100}%`,
+              background: 'rgba(245, 245, 245, 0.6)',
+              borderBottom: '1px dashed rgba(99, 102, 241, 0.3)',
+            }}
+          />
+        )}
+        {/* Dim the region below the active zone */}
+        {region.bottom < 1 && (
           <div
             className="absolute left-0 right-0"
-            style={{ top: `${XHEIGHT * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.55)' }}
-          >
-            <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1">
-              x-height
-            </span>
-          </div>
+            style={{
+              top: `${region.bottom * 100}%`,
+              height: `${(1 - region.bottom) * 100}%`,
+              background: 'rgba(245, 245, 245, 0.6)',
+              borderTop: '1px dashed rgba(99, 102, 241, 0.3)',
+            }}
+          />
         )}
+
+        {/* Cap line */}
         <div
           className="absolute left-0 right-0"
-          style={{ top: `${BASE * 100}%`, borderTop: '2px solid rgba(99,102,241,0.6)' }}
+          style={{
+            top: `${CAP_LINE * 100}%`,
+            borderTop: activeClass === 'cap' || activeClass === 'ascender' ? '2px solid rgba(99, 102, 241, 0.55)' : '1px dashed rgba(99, 102, 241, 0.35)',
+          }}
         >
-          <span className="absolute left-3 -top-4 text-[10px] font-semibold text-brand-700 bg-white px-1">
+          <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1.5 rounded">
+            cap line
+          </span>
+        </div>
+
+        {/* X-height line */}
+        <div
+          className="absolute left-0 right-0"
+          style={{
+            top: `${X_HEIGHT_LINE * 100}%`,
+            borderTop: activeClass === 'xheight' || activeClass === 'descender' ? '2px solid rgba(99, 102, 241, 0.55)' : '1px dashed rgba(99, 102, 241, 0.35)',
+          }}
+        >
+          <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1.5 rounded">
+            x-height
+          </span>
+        </div>
+
+        {/* Baseline — always strong */}
+        <div
+          className="absolute left-0 right-0"
+          style={{
+            top: `${BASELINE * 100}%`,
+            borderTop: '2px solid rgba(99, 102, 241, 0.7)',
+          }}
+        >
+          <span className="absolute left-3 -top-4 text-[10px] font-bold text-brand-700 bg-white px-1.5 rounded">
             baseline
           </span>
         </div>
+
+        {/* Descender line */}
         <div
           className="absolute left-0 right-0"
-          style={{ top: `${DESC * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}
+          style={{
+            top: `${DESCENDER_LINE * 100}%`,
+            borderTop: activeClass === 'descender' ? '2px solid rgba(99, 102, 241, 0.55)' : '1px dashed rgba(99, 102, 241, 0.35)',
+          }}
         >
-          <span className="absolute left-3 -top-3 text-[10px] font-medium text-brand-600 bg-white px-1">
-            desc
+          <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1.5 rounded">
+            descender
           </span>
+        </div>
+
+        {/* Active zone label */}
+        <div
+          className="absolute right-3 px-2 py-0.5 rounded text-[10px] font-bold bg-brand-600 text-white"
+          style={{ top: `${region.top * 100 + 0.5}%` }}
+        >
+          {activeClass.toUpperCase()} ZONE
         </div>
       </div>
     );
@@ -900,28 +1015,18 @@ export default function VintageCalligraphyApp({ session }) {
           </p>
           <div className="space-y-1">
             <button
-              onClick={() => {
-                setActiveView('editor');
-                onPick?.();
-              }}
+              onClick={() => { setActiveView('editor'); onPick?.(); }}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-base ${
-                activeView === 'editor'
-                  ? 'bg-brand-50 text-brand-700'
-                  : 'text-ink-700 hover:bg-ink-50'
+                activeView === 'editor' ? 'bg-brand-50 text-brand-700' : 'text-ink-700 hover:bg-ink-50'
               }`}
             >
               <Edit3 size={16} />
               <span>Letter Editor</span>
             </button>
             <button
-              onClick={() => {
-                setActiveView('notebook');
-                onPick?.();
-              }}
+              onClick={() => { setActiveView('notebook'); onPick?.(); }}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-base ${
-                activeView === 'notebook'
-                  ? 'bg-brand-50 text-brand-700'
-                  : 'text-ink-700 hover:bg-ink-50'
+                activeView === 'notebook' ? 'bg-brand-50 text-brand-700' : 'text-ink-700 hover:bg-ink-50'
               }`}
             >
               <BookOpen size={16} />
@@ -947,10 +1052,7 @@ export default function VintageCalligraphyApp({ session }) {
                 return (
                   <button
                     key={letter}
-                    onClick={() => {
-                      pickLetter(letter);
-                      onPick?.();
-                    }}
+                    onClick={() => { pickLetter(letter); onPick?.(); }}
                     className={`relative h-8 rounded-md text-xs font-semibold transition-base ${
                       active
                         ? 'bg-brand-600 text-white shadow-card'
@@ -969,10 +1071,7 @@ export default function VintageCalligraphyApp({ session }) {
       </div>
       <div className="p-4 border-t border-ink-200">
         <button
-          onClick={() => {
-            exportSheet();
-            onPick?.();
-          }}
+          onClick={() => { exportSheet(); onPick?.(); }}
           className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-ink-950 text-white text-sm font-medium hover:bg-ink-800 shadow-card transition-base"
         >
           <Download size={14} />
@@ -999,15 +1098,10 @@ export default function VintageCalligraphyApp({ session }) {
         <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-ink-200 rounded-xl shadow-floating overflow-hidden z-50 animate-fade-in">
           <div className="px-4 py-3 border-b border-ink-100">
             <p className="text-xs text-ink-500">Signed in as</p>
-            <p className="text-sm font-medium text-ink-950 truncate">
-              {session?.user?.email}
-            </p>
+            <p className="text-sm font-medium text-ink-950 truncate">{session?.user?.email}</p>
           </div>
           <button
-            onClick={() => {
-              navigate('/');
-              setUserMenuOpen(false);
-            }}
+            onClick={() => { navigate('/'); setUserMenuOpen(false); }}
             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 transition-base text-left"
           >
             <Home size={14} />
@@ -1129,9 +1223,7 @@ export default function VintageCalligraphyApp({ session }) {
           <button
             onClick={() => setActiveView('editor')}
             className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${
-              activeView === 'editor'
-                ? 'bg-brand-600 text-white'
-                : 'text-ink-600 hover:bg-ink-100'
+              activeView === 'editor' ? 'bg-brand-600 text-white' : 'text-ink-600 hover:bg-ink-100'
             }`}
           >
             <Edit3 size={12} /> Editor
@@ -1139,9 +1231,7 @@ export default function VintageCalligraphyApp({ session }) {
           <button
             onClick={() => setActiveView('notebook')}
             className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${
-              activeView === 'notebook'
-                ? 'bg-brand-600 text-white'
-                : 'text-ink-600 hover:bg-ink-100'
+              activeView === 'notebook' ? 'bg-brand-600 text-white' : 'text-ink-600 hover:bg-ink-100'
             }`}
           >
             <BookOpen size={12} /> Notebook
@@ -1201,20 +1291,12 @@ export default function VintageCalligraphyApp({ session }) {
                   </button>
                   <div className="text-center flex-1">
                     <div className="text-sm leading-none">
-                      <span className="text-xs text-ink-500">
-                        {CATEGORIES[activeCategory].label}
-                      </span>
-                      <span className="ml-2 font-bold text-lg text-brand-600">
-                        {activeLetter}
-                      </span>
-                      {savedFlash && (
-                        <Check size={12} className="inline ml-2 text-brand-600" />
-                      )}
+                      <span className="text-xs text-ink-500">{CATEGORIES[activeCategory].label}</span>
+                      <span className="ml-2 font-bold text-lg text-brand-600">{activeLetter}</span>
+                      {savedFlash && <Check size={12} className="inline ml-2 text-brand-600" />}
                     </div>
                     <p className="text-[10px] text-ink-500 mt-0.5">
-                      {inTransform
-                        ? 'Drag corners to scale · drag center to move'
-                        : drawingHint()}
+                      {inTransform ? 'Drag corners to scale · drag center to move' : drawingHint()}
                     </p>
                   </div>
                   <button
@@ -1230,7 +1312,7 @@ export default function VintageCalligraphyApp({ session }) {
                   className="flex-1 w-full rounded-xl relative overflow-hidden bg-white border border-ink-200"
                   style={{ minHeight: 0, touchAction: 'none' }}
                 >
-                  {!inTransform && renderEditorGuides(activeCategory)}
+                  {!inTransform && renderEditorGuides()}
                   <canvas
                     ref={canvasRef}
                     className="absolute inset-0 touch-none"
@@ -1251,40 +1333,21 @@ export default function VintageCalligraphyApp({ session }) {
                       <div className="flex gap-3">
                         <div className="flex-1">
                           <div className="flex justify-between mb-1">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">
-                              Nib
-                            </span>
-                            <span className="text-[10px] font-semibold text-brand-600">
-                              {baseThickness}
-                            </span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">Nib</span>
+                            <span className="text-[10px] font-semibold text-brand-600">{baseThickness}</span>
                           </div>
-                          <input
-                            type="range"
-                            min="2"
-                            max="30"
-                            value={baseThickness}
+                          <input type="range" min="2" max="30" value={baseThickness}
                             onChange={(e) => setBaseThickness(Number(e.target.value))}
-                            className="w-full accent-brand-600"
-                          />
+                            className="w-full accent-brand-600" />
                         </div>
                         <div className="flex-1">
                           <div className="flex justify-between mb-1">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">
-                              Ink
-                            </span>
-                            <span className="text-[10px] font-semibold text-brand-600">
-                              {Math.round(opacity * 100)}%
-                            </span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">Ink</span>
+                            <span className="text-[10px] font-semibold text-brand-600">{Math.round(opacity * 100)}%</span>
                           </div>
-                          <input
-                            type="range"
-                            min="0.2"
-                            max="1"
-                            step="0.05"
-                            value={opacity}
+                          <input type="range" min="0.2" max="1" step="0.05" value={opacity}
                             onChange={(e) => setOpacity(Number(e.target.value))}
-                            className="w-full accent-brand-600"
-                          />
+                            className="w-full accent-brand-600" />
                         </div>
                       </div>
                     </div>
@@ -1307,31 +1370,20 @@ export default function VintageCalligraphyApp({ session }) {
                       >
                         <Settings size={14} className="text-ink-600" />
                       </button>
-                      <button
-                        onClick={clearCanvas}
-                        className="py-2 px-2.5 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 transition-base"
-                      >
+                      <button onClick={clearCanvas}
+                        className="py-2 px-2.5 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 transition-base">
                         <Trash2 size={14} className="text-ink-600" />
                       </button>
-                      <button
-                        onClick={enterTransformMode}
-                        className="flex-1 py-2 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 transition-base inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-ink-700"
-                      >
+                      <button onClick={enterTransformMode}
+                        className="flex-1 py-2 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 transition-base inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-ink-700">
                         <Maximize2 size={12} /> Resize
                       </button>
-                      <button
-                        onClick={saveLetter}
-                        className="flex-1 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base inline-flex items-center justify-center gap-1.5 text-xs font-semibold"
-                      >
+                      <button onClick={saveLetter}
+                        className="flex-1 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base inline-flex items-center justify-center gap-1.5 text-xs font-semibold">
                         <Save size={12} /> Save
                       </button>
-                      <button
-                        onClick={() => {
-                          saveLetter();
-                          setTimeout(goToNextLetter, 200);
-                        }}
-                        className="py-2 px-2.5 rounded-lg bg-ink-950 text-white hover:bg-ink-800 transition-base"
-                      >
+                      <button onClick={() => { saveLetter(); setTimeout(goToNextLetter, 200); }}
+                        className="py-2 px-2.5 rounded-lg bg-ink-950 text-white hover:bg-ink-800 transition-base">
                         <ChevronRight size={14} />
                       </button>
                     </div>
@@ -1418,7 +1470,7 @@ export default function VintageCalligraphyApp({ session }) {
               <div className="flex items-end justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-brand-600 mb-1">
-                    {CATEGORIES[activeCategory].label}
+                    {CATEGORIES[activeCategory].label} · {activeClass} zone
                   </p>
                   <h1 className="text-3xl font-bold text-ink-950 tracking-tight">
                     Letter <span className="text-brand-600">{activeLetter}</span>
@@ -1448,7 +1500,7 @@ export default function VintageCalligraphyApp({ session }) {
                 className="flex-1 w-full rounded-2xl bg-white border border-ink-200 shadow-card relative overflow-hidden"
                 style={{ cursor: inTransform ? 'move' : 'crosshair' }}
               >
-                {!inTransform && renderEditorGuides(activeCategory)}
+                {!inTransform && renderEditorGuides()}
                 <canvas
                   ref={canvasRef}
                   className="absolute inset-0 touch-none"
@@ -1468,88 +1520,54 @@ export default function VintageCalligraphyApp({ session }) {
                   <>
                     <div className="flex-1 min-w-[180px]">
                       <div className="flex justify-between mb-1.5">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-ink-600">
-                          Nib thickness
-                        </span>
-                        <span className="text-xs font-bold text-brand-600">
-                          {baseThickness}px
-                        </span>
+                        <span className="text-xs font-semibold uppercase tracking-wider text-ink-600">Nib thickness</span>
+                        <span className="text-xs font-bold text-brand-600">{baseThickness}px</span>
                       </div>
-                      <input
-                        type="range"
-                        min="2"
-                        max="40"
-                        value={baseThickness}
+                      <input type="range" min="2" max="40" value={baseThickness}
                         onChange={(e) => setBaseThickness(Number(e.target.value))}
-                        className="w-full accent-brand-600"
-                      />
+                        className="w-full accent-brand-600" />
                     </div>
                     <div className="flex-1 min-w-[180px]">
                       <div className="flex justify-between mb-1.5">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-ink-600">
-                          Ink opacity
-                        </span>
-                        <span className="text-xs font-bold text-brand-600">
-                          {Math.round(opacity * 100)}%
-                        </span>
+                        <span className="text-xs font-semibold uppercase tracking-wider text-ink-600">Ink opacity</span>
+                        <span className="text-xs font-bold text-brand-600">{Math.round(opacity * 100)}%</span>
                       </div>
-                      <input
-                        type="range"
-                        min="0.2"
-                        max="1"
-                        step="0.05"
-                        value={opacity}
+                      <input type="range" min="0.2" max="1" step="0.05" value={opacity}
                         onChange={(e) => setOpacity(Number(e.target.value))}
-                        className="w-full accent-brand-600"
-                      />
+                        className="w-full accent-brand-600" />
                     </div>
                   </>
                 )}
 
                 <div className="flex items-center gap-2 ml-auto">
                   {inTransform ? (
-                    <button
-                      onClick={exitTransformMode}
-                      className="inline-flex items-center gap-1.5 px-5 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base text-sm font-semibold"
-                    >
+                    <button onClick={exitTransformMode}
+                      className="inline-flex items-center gap-1.5 px-5 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base text-sm font-semibold">
                       <Check size={14} /> Done — Apply Size
                     </button>
                   ) : (
                     <>
-                      <button
-                        onClick={clearCanvas}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-ink-200 hover:bg-ink-50 transition-base text-sm font-medium text-ink-700"
-                      >
+                      <button onClick={clearCanvas}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-ink-200 hover:bg-ink-50 transition-base text-sm font-medium text-ink-700">
                         <Trash2 size={14} /> Clear
                       </button>
                       {customAlphabet[activeLetter] && (
-                        <button
-                          onClick={eraseLetter}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-red-200 hover:bg-red-50 transition-base text-sm font-medium text-red-700"
-                        >
+                        <button onClick={eraseLetter}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-red-200 hover:bg-red-50 transition-base text-sm font-medium text-red-700">
                           Erase
                         </button>
                       )}
-                      <button
-                        onClick={enterTransformMode}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-ink-200 hover:bg-ink-50 transition-base text-sm font-medium text-ink-700"
-                      >
+                      <button onClick={enterTransformMode}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-ink-200 hover:bg-ink-50 transition-base text-sm font-medium text-ink-700">
                         <Maximize2 size={14} /> Resize
                       </button>
-                      <button
-                        onClick={saveLetter}
-                        className="inline-flex items-center gap-1.5 px-5 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base text-sm font-semibold"
-                      >
+                      <button onClick={saveLetter}
+                        className="inline-flex items-center gap-1.5 px-5 py-2 rounded-lg bg-brand-600 text-white shadow-card hover:bg-brand-700 transition-base text-sm font-semibold">
                         <Save size={14} /> Save
                       </button>
-                      <button
-                        onClick={() => {
-                          saveLetter();
-                          setTimeout(goToNextLetter, 200);
-                        }}
+                      <button onClick={() => { saveLetter(); setTimeout(goToNextLetter, 200); }}
                         title="Save and advance"
-                        className="inline-flex items-center px-3 py-2 rounded-lg bg-ink-950 text-white hover:bg-ink-800 transition-base"
-                      >
+                        className="inline-flex items-center px-3 py-2 rounded-lg bg-ink-950 text-white hover:bg-ink-800 transition-base">
                         <ChevronRight size={14} />
                       </button>
                     </>
@@ -1560,9 +1578,7 @@ export default function VintageCalligraphyApp({ session }) {
           ) : (
             <div className="max-w-6xl mx-auto h-full flex flex-col gap-4">
               <div>
-                <h1 className="text-3xl font-bold text-ink-950 tracking-tight">
-                  Notebook
-                </h1>
+                <h1 className="text-3xl font-bold text-ink-950 tracking-tight">Notebook</h1>
                 <p className="text-sm text-ink-500 mt-1">
                   Write on the left — your custom letters appear on the right.
                 </p>
