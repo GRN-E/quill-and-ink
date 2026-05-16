@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   BookOpen, Download, Trash2, Save, Check, Edit3, Menu, X,
   ChevronRight, ChevronLeft, Eye, PenLine, Maximize2, LogOut,
-  Settings, Home, Sliders, Image as ImageIcon, Palette,
+  Settings, Home, Sliders, Image as ImageIcon, Palette, FileText,
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { supabase } from './supabase';
 import Logo from './components/Logo';
 import { useLang } from './i18n';
@@ -35,12 +36,9 @@ const classifyChar = (ch) => {
   return 'cap';
 };
 
-// Relative target heights (cap = 1.0). Used to scale captured ink at render time.
 const CLASS_HEIGHT = { cap: 1.0, ascender: 1.0, xheight: 0.62, descender: 0.78 };
-// How far below the baseline a class drops (fraction of cap height)
 const CLASS_DROP = { cap: 0, ascender: 0, xheight: 0, descender: 0.30 };
 
-// Visual guide line positions in the editor (fractions of canvas height)
 const GUIDE_CAP = 0.18;
 const GUIDE_XHEIGHT = 0.45;
 const GUIDE_BASELINE = 0.78;
@@ -137,7 +135,6 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
       for (const ch of run.text) charsWithColor.push({ ch, color: run.color });
     });
 
-    // Each glyph: scale captured ink to the class target height.
     const getGlyph = (item) => {
       const { ch, color } = item;
       const cls = classifyChar(ch);
@@ -151,12 +148,10 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
           const nW = tinted.naturalWidth || tinted.width;
           const nH = tinted.naturalHeight || tinted.height;
           const aspect = nW / nH || 1;
-          // Scale so the glyph's height equals targetH; width follows aspect
           return { type: 'img', img: tinted, w: targetH * aspect, h: targetH, drop, ch, cls, color };
         }
       }
-      // Fallback: render the actual character in Georgia, sized to the SAME targetH
-      const fontSize = targetH * 1.35; // Georgia cap height is ~0.7 of font size
+      const fontSize = targetH * 1.35;
       measureCtx.font = `${fontSize}px Georgia, serif`;
       const w = measureCtx.measureText(ch).width;
       return { type: 'text', ch, w, h: targetH, drop, fontSize, cls, color };
@@ -260,7 +255,6 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
           ctx.rotate(rot);
           ctx.translate(-(x + g.w / 2), -baselineY);
           if (g.type === 'img') {
-            // Bottom of glyph sits at baseline + its drop; top is baseline - h + drop
             const top = baselineY - g.h + g.drop;
             ctx.drawImage(g.img, x, top + wobble, g.w, g.h);
           } else {
@@ -440,19 +434,34 @@ function RichTextEditor({ runs, setRuns, currentColor, setCurrentColor, mobile, 
 }
 
 // ============ NOTEBOOK TOOLBAR ============
-function NotebookToolbar({ settings, setSettings, onExport, mobile, t }) {
+function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSaveNote, noteState, mobile, t }) {
   const update = (key) => (e) => setSettings({ ...settings, [key]: Number(e.target.value) });
   const paperLabel = { blank: t('app_paper_blank'), lined: t('app_paper_lined'), dotted: t('app_paper_dotted'), grid: t('app_paper_grid') };
   return (
     <div className={`rounded-xl bg-white border border-ink-200 ${mobile ? 'p-3' : 'p-4'}`}>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5">
           <Sliders size={12} /> {t('app_controls')}
         </p>
-        <button onClick={onExport}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 shadow-card transition-base">
-          <ImageIcon size={12} /> {t('app_export_png')}
-        </button>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button onClick={onSaveNote} disabled={noteState === 'saving'}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-base ${
+              noteState === 'saved'
+                ? 'bg-green-600 text-white'
+                : 'bg-ink-100 text-ink-700 hover:bg-ink-200'
+            }`}>
+            {noteState === 'saved' ? <Check size={12} /> : <Save size={12} />}
+            {noteState === 'saving' ? t('app_saving') : noteState === 'saved' ? t('app_note_saved') : t('app_save_note')}
+          </button>
+          <button onClick={onExportPNG}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-ink-100 text-ink-700 text-xs font-semibold hover:bg-ink-200 transition-base">
+            <ImageIcon size={12} /> PNG
+          </button>
+          <button onClick={onExportPDF}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 shadow-card transition-base">
+            <FileText size={12} /> {t('app_export_pdf')}
+          </button>
+        </div>
       </div>
       <div className={`grid ${mobile ? 'grid-cols-2 gap-2.5' : 'grid-cols-4 gap-4'}`}>
         <div>
@@ -525,6 +534,7 @@ export default function VintageCalligraphyApp({ session }) {
   const [notebookSettings, setNotebookSettings] = useState(DEFAULT_NOTEBOOK_SETTINGS);
   const [editorMode, setEditorMode] = useState('draw');
   const [transformBox, setTransformBox] = useState(null);
+  const [noteState, setNoteState] = useState('idle'); // idle | saving | saved
   const transformImageRef = useRef(null);
   const transformDragRef = useRef(null);
   const canvasRef = useRef(null);
@@ -536,6 +546,7 @@ export default function VintageCalligraphyApp({ session }) {
   const lastTime = useRef(0);
   const currentWidth = useRef(baseThickness);
 
+  // Load saved alphabet
   useEffect(() => {
     if (!session?.user) return;
     let cancelled = false;
@@ -547,6 +558,21 @@ export default function VintageCalligraphyApp({ session }) {
     return () => { cancelled = true; };
   }, [session?.user?.id]);
 
+  // Load saved note (runs) once on sign-in
+  useEffect(() => {
+    if (!session?.user) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('notes').select('content').eq('user_id', session.user.id).maybeSingle();
+      if (cancelled) return;
+      if (data?.content && Array.isArray(data.content) && data.content.length > 0) {
+        setRuns(data.content);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
+  // Debounced save of alphabet
   useEffect(() => {
     if (syncing || !session?.user) return;
     const tm = setTimeout(async () => {
@@ -554,6 +580,23 @@ export default function VintageCalligraphyApp({ session }) {
     }, 1000);
     return () => clearTimeout(tm);
   }, [customAlphabet, session?.user?.id, syncing]);
+
+  // Manual save of the note
+  const saveNote = async () => {
+    if (!session?.user) return;
+    setNoteState('saving');
+    try {
+      await supabase.from('notes').upsert(
+        { user_id: session.user.id, content: runs, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      );
+      setNoteState('saved');
+      setTimeout(() => setNoteState('idle'), 1800);
+    } catch (e) {
+      setNoteState('idle');
+      alert('Save failed: ' + (e?.message || 'unknown error'));
+    }
+  };
 
   const completedCount = Object.keys(customAlphabet).length;
   const counts = {
@@ -581,7 +624,6 @@ export default function VintageCalligraphyApp({ session }) {
     transformImageRef.current = null;
   }, [activeLetter, activeView]);
 
-  // Render the saved letter back, centered on the baseline guide, at a sensible size
   useEffect(() => {
     if (activeView !== 'editor' || editorMode !== 'draw') return;
     const id = requestAnimationFrame(() => {
@@ -607,7 +649,6 @@ export default function VintageCalligraphyApp({ session }) {
       if (src) {
         const img = new Image();
         img.onload = () => {
-          // Place the saved ink between cap line and baseline, preserving aspect
           const capY = GUIDE_CAP * h;
           const baseY = GUIDE_BASELINE * h;
           const zoneH = baseY - capY;
@@ -793,7 +834,6 @@ export default function VintageCalligraphyApp({ session }) {
     });
   };
 
-  // FIXED SAVE: capture the EXACT bounding box of all ink — nothing clipped.
   const saveLetter = () => {
     const src = canvasRef.current;
     const ctx = src.getContext('2d');
@@ -813,7 +853,6 @@ export default function VintageCalligraphyApp({ session }) {
       }
     }
     if (!found) { alert(t('app_empty_hint')); return; }
-    // Small padding so strokes at the edge aren't visually cut
     const pad = Math.round(3 * dpr);
     minX = Math.max(0, minX - pad);
     minY = Math.max(0, minY - pad);
@@ -919,7 +958,7 @@ export default function VintageCalligraphyApp({ session }) {
     });
   };
 
-  const exportNotebook = () => {
+  const exportNotebookPNG = () => {
     const cv = previewCanvasRef.current?.getCanvas?.();
     if (!cv) { alert(t('app_no_glyphs')); return; }
     const totalText = runs.map((r) => r.text).join('');
@@ -928,6 +967,45 @@ export default function VintageCalligraphyApp({ session }) {
     link.download = 'inkly-notebook.png';
     link.href = cv.toDataURL('image/png');
     link.click();
+  };
+
+  const exportNotebookPDF = () => {
+    const cv = previewCanvasRef.current?.getCanvas?.();
+    if (!cv) { alert(t('app_no_glyphs')); return; }
+    const totalText = runs.map((r) => r.text).join('');
+    if (!totalText.trim()) { alert(t('app_empty_hint')); return; }
+    const imgData = cv.toDataURL('image/png');
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 36;
+    const usableW = pageW - margin * 2;
+    const usableH = pageH - margin * 2;
+    // Scale the canvas image to fit the page width
+    const imgW = usableW;
+    const imgH = (cv.height / cv.width) * imgW;
+    if (imgH <= usableH) {
+      pdf.addImage(imgData, 'PNG', margin, margin, imgW, imgH);
+    } else {
+      // Image taller than one page — slice it into multiple pages
+      let remaining = cv.height;
+      let srcY = 0;
+      const pxPerPage = (usableH / imgW) * cv.width;
+      while (remaining > 0) {
+        const sliceH = Math.min(pxPerPage, remaining);
+        const slice = document.createElement('canvas');
+        slice.width = cv.width;
+        slice.height = sliceH;
+        slice.getContext('2d').drawImage(cv, 0, srcY, cv.width, sliceH, 0, 0, cv.width, sliceH);
+        const sliceData = slice.toDataURL('image/png');
+        const sliceImgH = (sliceH / cv.width) * imgW;
+        pdf.addImage(sliceData, 'PNG', margin, margin, imgW, sliceImgH);
+        remaining -= sliceH;
+        srcY += sliceH;
+        if (remaining > 0) pdf.addPage();
+      }
+    }
+    pdf.save('inkly-notebook.pdf');
   };
 
   const drawingHint = () => {
@@ -943,7 +1021,6 @@ export default function VintageCalligraphyApp({ session }) {
     navigate('/');
   };
 
-  // Editor guide lines — reference only, drawing is free (Option 1)
   const renderEditorGuides = () => (
     <div className="absolute inset-0 pointer-events-none">
       <div className="absolute left-0 right-0" style={{ top: `${GUIDE_CAP * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}>
@@ -1200,7 +1277,9 @@ export default function VintageCalligraphyApp({ session }) {
                 </button>
               </div>
               {notebookMode === 'preview' && (
-                <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings} onExport={exportNotebook} mobile={true} t={t} />
+                <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
+                  onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveNote={saveNote}
+                  noteState={noteState} mobile={true} t={t} />
               )}
               <div className="flex-1 min-h-0" style={{ minHeight: '300px' }}>
                 {notebookMode === 'write'
@@ -1297,7 +1376,9 @@ export default function VintageCalligraphyApp({ session }) {
                 <h1 className="text-3xl font-bold text-ink-950 tracking-tight">{t('app_notebook_title')}</h1>
                 <p className="text-sm text-ink-500 mt-1">{t('app_notebook_sub')}</p>
               </div>
-              <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings} onExport={exportNotebook} mobile={false} t={t} />
+              <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
+                onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveNote={saveNote}
+                noteState={noteState} mobile={false} t={t} />
               <div className="flex-1 min-h-0 grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5"><PenLine size={12} /> {t('app_write')}</p>
