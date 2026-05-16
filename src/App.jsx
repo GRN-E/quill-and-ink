@@ -7,7 +7,6 @@ import QuillAndInk from './QuillAndInk';
 import Landing from './pages/Landing';
 import Pricing from './pages/Pricing';
 import About from './pages/About';
-import { LanguageProvider } from './i18n';
 
 function useSession() {
   const [session, setSession] = useState(null);
@@ -47,12 +46,9 @@ export default function App() {
     <LanguageProvider>
       <BrowserRouter>
         <Routes>
-          {/* Public marketing pages */}
           <Route path="/" element={<Landing session={session} />} />
           <Route path="/pricing" element={<Pricing session={session} />} />
           <Route path="/about" element={<About session={session} />} />
-
-          {/* Auth pages */}
           <Route
             path="/login"
             element={session ? <Navigate to="/app" replace /> : <Auth />}
@@ -61,8 +57,6 @@ export default function App() {
             path="/signup"
             element={session ? <Navigate to="/app" replace /> : <Auth />}
           />
-
-          {/* Protected app */}
           <Route
             path="/app"
             element={
@@ -71,8 +65,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
