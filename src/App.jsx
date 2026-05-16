@@ -7,6 +7,7 @@ import QuillAndInk from './QuillAndInk';
 import Landing from './pages/Landing';
 import Pricing from './pages/Pricing';
 import About from './pages/About';
+import { LanguageProvider } from './i18n';
 
 function useSession() {
   const [session, setSession] = useState(null);
