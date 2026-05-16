@@ -4,6 +4,7 @@ import {
   BookOpen, Download, Trash2, Save, Check, Edit3, Menu, X,
   ChevronRight, ChevronLeft, Eye, PenLine, Maximize2, LogOut,
   Settings, Home, Sliders, Image as ImageIcon, Palette, FileText,
+  Plus, Pencil, FolderOpen, ArrowLeft,
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { supabase } from './supabase';
@@ -58,6 +59,7 @@ const PEN_COLORS = [
   { hex: '#b45309', label: 'Sepia' },
 ];
 const DEFAULT_PEN_COLOR = PEN_COLORS[0].hex;
+const EMPTY_RUNS = [{ text: '', color: DEFAULT_PEN_COLOR }];
 
 const tintGlyphImage = (sourceImg, hex) => {
   const cv = document.createElement('canvas');
@@ -434,7 +436,7 @@ function RichTextEditor({ runs, setRuns, currentColor, setCurrentColor, mobile, 
 }
 
 // ============ NOTEBOOK TOOLBAR ============
-function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSaveNote, noteState, mobile, t }) {
+function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSaveDoc, saveState, mobile, t }) {
   const update = (key) => (e) => setSettings({ ...settings, [key]: Number(e.target.value) });
   const paperLabel = { blank: t('app_paper_blank'), lined: t('app_paper_lined'), dotted: t('app_paper_dotted'), grid: t('app_paper_grid') };
   return (
@@ -444,14 +446,12 @@ function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSa
           <Sliders size={12} /> {t('app_controls')}
         </p>
         <div className="flex items-center gap-1.5 flex-wrap">
-          <button onClick={onSaveNote} disabled={noteState === 'saving'}
+          <button onClick={onSaveDoc} disabled={saveState === 'saving'}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-base ${
-              noteState === 'saved'
-                ? 'bg-green-600 text-white'
-                : 'bg-ink-100 text-ink-700 hover:bg-ink-200'
+              saveState === 'saved' ? 'bg-green-600 text-white' : 'bg-ink-100 text-ink-700 hover:bg-ink-200'
             }`}>
-            {noteState === 'saved' ? <Check size={12} /> : <Save size={12} />}
-            {noteState === 'saving' ? t('app_saving') : noteState === 'saved' ? t('app_note_saved') : t('app_save_note')}
+            {saveState === 'saved' ? <Check size={12} /> : <Save size={12} />}
+            {saveState === 'saving' ? t('app_saving') : saveState === 'saved' ? t('app_doc_saved') : t('app_doc_save')}
           </button>
           <button onClick={onExportPNG}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-ink-100 text-ink-700 text-xs font-semibold hover:bg-ink-200 transition-base">
@@ -521,7 +521,7 @@ export default function VintageCalligraphyApp({ session }) {
   const [activeLetter, setActiveLetter] = useState(UPPER[0]);
   const [activeCategory, setActiveCategory] = useState('uppercase');
   const [activeView, setActiveView] = useState('editor');
-  const [runs, setRuns] = useState([{ text: t('notebook_sample'), color: DEFAULT_PEN_COLOR }]);
+  const [runs, setRuns] = useState(EMPTY_RUNS);
   const [currentColor, setCurrentColor] = useState(DEFAULT_PEN_COLOR);
   const [notebookMode, setNotebookMode] = useState('write');
   const [baseThickness, setBaseThickness] = useState(10);
@@ -534,7 +534,19 @@ export default function VintageCalligraphyApp({ session }) {
   const [notebookSettings, setNotebookSettings] = useState(DEFAULT_NOTEBOOK_SETTINGS);
   const [editorMode, setEditorMode] = useState('draw');
   const [transformBox, setTransformBox] = useState(null);
-  const [noteState, setNoteState] = useState('idle'); // idle | saving | saved
+
+  // ---- Document system state ----
+  const [docs, setDocs] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [currentDoc, setCurrentDoc] = useState(null);
+  const [notebookScreen, setNotebookScreen] = useState('list'); // list | editor
+  const [creatingNew, setCreatingNew] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [docSaveState, setDocSaveState] = useState('idle'); // idle | saving | saved
+  const docLoadedRef = useRef(false);
+
   const transformImageRef = useRef(null);
   const transformDragRef = useRef(null);
   const canvasRef = useRef(null);
@@ -558,20 +570,6 @@ export default function VintageCalligraphyApp({ session }) {
     return () => { cancelled = true; };
   }, [session?.user?.id]);
 
-  // Load saved note (runs) once on sign-in
-  useEffect(() => {
-    if (!session?.user) return;
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase.from('notes').select('content').eq('user_id', session.user.id).maybeSingle();
-      if (cancelled) return;
-      if (data?.content && Array.isArray(data.content) && data.content.length > 0) {
-        setRuns(data.content);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [session?.user?.id]);
-
   // Debounced save of alphabet
   useEffect(() => {
     if (syncing || !session?.user) return;
@@ -581,21 +579,114 @@ export default function VintageCalligraphyApp({ session }) {
     return () => clearTimeout(tm);
   }, [customAlphabet, session?.user?.id, syncing]);
 
-  // Manual save of the note
-  const saveNote = async () => {
+  // ---- Document operations ----
+  const loadDocs = useCallback(async () => {
     if (!session?.user) return;
-    setNoteState('saving');
+    setDocsLoading(true);
+    const { data } = await supabase
+      .from('documents')
+      .select('id,title,template,updated_at')
+      .eq('user_id', session.user.id)
+      .order('updated_at', { ascending: false });
+    setDocs(data || []);
+    setDocsLoading(false);
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    loadDocs();
+  }, [loadDocs]);
+
+  const createDocument = async () => {
+    if (!session?.user) return;
+    const title = newTitle.trim() || 'Гарчиггүй';
+    const blankPages = [{ runs: [{ text: '', color: DEFAULT_PEN_COLOR }] }];
+    const { data, error } = await supabase
+      .from('documents')
+      .insert({ user_id: session.user.id, title, template: 'blank', pages: blankPages, settings: {} })
+      .select()
+      .single();
+    if (error) { alert('Error: ' + error.message); return; }
+    setCreatingNew(false);
+    setNewTitle('');
+    await loadDocs();
+    openDocument(data);
+  };
+
+  const openDocument = (doc) => {
+    setCurrentDoc(doc);
+    const pages = Array.isArray(doc.pages) ? doc.pages : [];
+    const firstRuns = pages[0]?.runs && Array.isArray(pages[0].runs) && pages[0].runs.length > 0
+      ? pages[0].runs
+      : [{ text: '', color: DEFAULT_PEN_COLOR }];
+    docLoadedRef.current = false;
+    setRuns(firstRuns);
+    setNotebookScreen('editor');
+    setNotebookMode('write');
+    setTimeout(() => { docLoadedRef.current = true; }, 300);
+  };
+
+  const openDocumentById = async (id) => {
+    const { data, error } = await supabase.from('documents').select('*').eq('id', id).single();
+    if (error) { alert('Error: ' + error.message); return; }
+    openDocument(data);
+  };
+
+  const saveCurrentDocument = async () => {
+    if (!session?.user || !currentDoc) return;
+    setDocSaveState('saving');
     try {
-      await supabase.from('notes').upsert(
-        { user_id: session.user.id, content: runs, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' }
-      );
-      setNoteState('saved');
-      setTimeout(() => setNoteState('idle'), 1800);
+      const pages = [{ runs }];
+      const { error } = await supabase
+        .from('documents')
+        .update({ pages, title: currentDoc.title, updated_at: new Date().toISOString() })
+        .eq('id', currentDoc.id);
+      if (error) throw error;
+      setDocSaveState('saved');
+      setDocs((prev) => prev.map((d) => d.id === currentDoc.id ? { ...d, title: currentDoc.title, updated_at: new Date().toISOString() } : d));
+      setTimeout(() => setDocSaveState('idle'), 1800);
     } catch (e) {
-      setNoteState('idle');
-      alert('Save failed: ' + (e?.message || 'unknown error'));
+      setDocSaveState('idle');
+      alert('Save failed: ' + (e?.message || 'unknown'));
     }
+  };
+
+  // Debounced autosave when editing a document
+  useEffect(() => {
+    if (!currentDoc || notebookScreen !== 'editor' || !docLoadedRef.current) return;
+    const tm = setTimeout(async () => {
+      const pages = [{ runs }];
+      await supabase.from('documents')
+        .update({ pages, updated_at: new Date().toISOString() })
+        .eq('id', currentDoc.id);
+      setDocs((prev) => prev.map((d) => d.id === currentDoc.id ? { ...d, updated_at: new Date().toISOString() } : d));
+    }, 1500);
+    return () => clearTimeout(tm);
+  }, [runs, currentDoc, notebookScreen]);
+
+  const renameDocument = async (id) => {
+    const title = renameValue.trim();
+    if (!title) { setRenamingId(null); return; }
+    await supabase.from('documents').update({ title, updated_at: new Date().toISOString() }).eq('id', id);
+    setRenamingId(null);
+    setRenameValue('');
+    setDocs((prev) => prev.map((d) => d.id === id ? { ...d, title } : d));
+    if (currentDoc?.id === id) setCurrentDoc({ ...currentDoc, title });
+  };
+
+  const deleteDocument = async (id) => {
+    if (!window.confirm(t('app_doc_delete_confirm'))) return;
+    await supabase.from('documents').delete().eq('id', id);
+    setDocs((prev) => prev.filter((d) => d.id !== id));
+    if (currentDoc?.id === id) {
+      setCurrentDoc(null);
+      setNotebookScreen('list');
+    }
+  };
+
+  const backToDocList = () => {
+    setCurrentDoc(null);
+    setNotebookScreen('list');
+    loadDocs();
   };
 
   const completedCount = Object.keys(customAlphabet).length;
@@ -964,7 +1055,7 @@ export default function VintageCalligraphyApp({ session }) {
     const totalText = runs.map((r) => r.text).join('');
     if (!totalText.trim()) { alert(t('app_empty_hint')); return; }
     const link = document.createElement('a');
-    link.download = 'inkly-notebook.png';
+    link.download = (currentDoc?.title || 'inkly-notebook') + '.png';
     link.href = cv.toDataURL('image/png');
     link.click();
   };
@@ -981,13 +1072,11 @@ export default function VintageCalligraphyApp({ session }) {
     const margin = 36;
     const usableW = pageW - margin * 2;
     const usableH = pageH - margin * 2;
-    // Scale the canvas image to fit the page width
     const imgW = usableW;
     const imgH = (cv.height / cv.width) * imgW;
     if (imgH <= usableH) {
       pdf.addImage(imgData, 'PNG', margin, margin, imgW, imgH);
     } else {
-      // Image taller than one page — slice it into multiple pages
       let remaining = cv.height;
       let srcY = 0;
       const pxPerPage = (usableH / imgW) * cv.width;
@@ -1005,7 +1094,7 @@ export default function VintageCalligraphyApp({ session }) {
         if (remaining > 0) pdf.addPage();
       }
     }
-    pdf.save('inkly-notebook.pdf');
+    pdf.save((currentDoc?.title || 'inkly-notebook') + '.pdf');
   };
 
   const drawingHint = () => {
@@ -1067,9 +1156,9 @@ export default function VintageCalligraphyApp({ session }) {
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-base ${activeView === 'editor' ? 'bg-brand-50 text-brand-700' : 'text-ink-700 hover:bg-ink-50'}`}>
               <Edit3 size={16} /> <span>{t('app_editor')}</span>
             </button>
-            <button onClick={() => { setActiveView('notebook'); onPick?.(); }}
+            <button onClick={() => { setActiveView('notebook'); setNotebookScreen('list'); onPick?.(); }}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-base ${activeView === 'notebook' ? 'bg-brand-50 text-brand-700' : 'text-ink-700 hover:bg-ink-50'}`}>
-              <BookOpen size={16} /> <span>{t('app_notebook')}</span>
+              <BookOpen size={16} /> <span>{t('app_documents')}</span>
             </button>
           </div>
         </div>
@@ -1170,6 +1259,113 @@ export default function VintageCalligraphyApp({ session }) {
     );
   };
 
+  const fmtDate = (s) => {
+    try { return new Date(s).toLocaleDateString(); } catch (e) { return ''; }
+  };
+
+  const renderDocumentList = () => (
+    <div className="max-w-4xl mx-auto w-full flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-ink-950 tracking-tight">{t('app_documents')}</h1>
+          <p className="text-sm text-ink-500 mt-1">{docs.length} / 10</p>
+        </div>
+        {!creatingNew && docs.length < 10 && (
+          <button onClick={() => { setCreatingNew(true); setNewTitle(''); }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 shadow-card transition-base">
+            <Plus size={15} /> {t('app_new_document')}
+          </button>
+        )}
+      </div>
+
+      {creatingNew && (
+        <div className="rounded-xl bg-white border border-ink-200 p-4 flex flex-col gap-3">
+          <label className="text-xs font-semibold uppercase tracking-wider text-ink-600">{t('app_doc_title_label')}</label>
+          <input autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') createDocument(); }}
+            placeholder={t('app_doc_title_label')}
+            className="w-full px-3 py-2 text-sm rounded-lg border border-ink-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-base" />
+          <div className="flex gap-2">
+            <button onClick={createDocument}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-base">
+              <Check size={14} /> {t('app_doc_create')}
+            </button>
+            <button onClick={() => { setCreatingNew(false); setNewTitle(''); }}
+              className="px-4 py-2 rounded-lg bg-white border border-ink-200 text-sm font-medium text-ink-700 hover:bg-ink-50 transition-base">
+              {t('app_cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {docsLoading ? (
+        <p className="text-sm text-ink-500 py-8 text-center">{t('app_loading')}</p>
+      ) : docs.length === 0 && !creatingNew ? (
+        <div className="rounded-xl bg-white border border-dashed border-ink-300 p-10 text-center">
+          <FolderOpen size={32} className="mx-auto mb-3 text-ink-300" />
+          <p className="text-sm text-ink-500">{t('app_docs_empty')}</p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {docs.map((d) => (
+            <div key={d.id} className="rounded-xl bg-white border border-ink-200 p-4 flex items-center gap-3 hover:shadow-card transition-base">
+              <div className="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0">
+                <FileText size={18} />
+              </div>
+              {renamingId === d.id ? (
+                <div className="flex-1 flex items-center gap-2">
+                  <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') renameDocument(d.id); }}
+                    className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-ink-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100" />
+                  <button onClick={() => renameDocument(d.id)} className="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700">
+                    <Check size={14} />
+                  </button>
+                  <button onClick={() => { setRenamingId(null); setRenameValue(''); }} className="px-3 py-1.5 rounded-lg bg-white border border-ink-200 text-xs text-ink-600 hover:bg-ink-50">
+                    {t('app_cancel')}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-ink-950 truncate">{d.title}</p>
+                    <p className="text-xs text-ink-500">{fmtDate(d.updated_at)}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button onClick={() => openDocumentById(d.id)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition-base">
+                      <FolderOpen size={13} /> {t('app_doc_open')}
+                    </button>
+                    <button onClick={() => { setRenamingId(d.id); setRenameValue(d.title); }}
+                      title={t('app_doc_rename')}
+                      className="p-1.5 rounded-lg bg-white border border-ink-200 text-ink-600 hover:bg-ink-50 transition-base">
+                      <Pencil size={13} />
+                    </button>
+                    <button onClick={() => deleteDocument(d.id)}
+                      title={t('app_doc_delete')}
+                      className="p-1.5 rounded-lg bg-white border border-red-200 text-red-600 hover:bg-red-50 transition-base">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderDocBackBar = () => (
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      <button onClick={backToDocList}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-ink-200 text-sm font-medium text-ink-700 hover:bg-ink-50 transition-base">
+        <ArrowLeft size={14} /> {t('app_back_to_docs')}
+      </button>
+      <p className="text-base font-semibold text-ink-950 truncate flex-1 text-center">{currentDoc?.title}</p>
+      <div className="w-[120px] hidden sm:block" />
+    </div>
+  );
+
   const inTransform = editorMode === 'transform';
 
   if (isMobile) {
@@ -1180,8 +1376,8 @@ export default function VintageCalligraphyApp({ session }) {
           <button onClick={() => setActiveView('editor')} className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${activeView === 'editor' ? 'bg-brand-600 text-white' : 'text-ink-600 hover:bg-ink-100'}`}>
             <Edit3 size={12} /> {t('app_editor')}
           </button>
-          <button onClick={() => setActiveView('notebook')} className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${activeView === 'notebook' ? 'bg-brand-600 text-white' : 'text-ink-600 hover:bg-ink-100'}`}>
-            <BookOpen size={12} /> {t('app_notebook')}
+          <button onClick={() => { setActiveView('notebook'); setNotebookScreen('list'); }} className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${activeView === 'notebook' ? 'bg-brand-600 text-white' : 'text-ink-600 hover:bg-ink-100'}`}>
+            <BookOpen size={12} /> {t('app_documents')}
           </button>
         </div>
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -1266,8 +1462,11 @@ export default function VintageCalligraphyApp({ session }) {
                 </div>
               </div>
             </>
+          ) : notebookScreen === 'list' ? (
+            <div className="flex-1 min-h-0 overflow-y-auto p-3">{renderDocumentList()}</div>
           ) : (
             <div className="flex-1 min-h-0 flex flex-col p-3 gap-2 overflow-y-auto">
+              {renderDocBackBar()}
               <div className="flex gap-1 flex-shrink-0">
                 <button onClick={() => setNotebookMode('write')} className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-base inline-flex items-center justify-center gap-1.5 ${notebookMode === 'write' ? 'bg-brand-600 text-white' : 'text-ink-600 border border-ink-200 bg-white'}`}>
                   <PenLine size={12} /> {t('app_write')}
@@ -1278,8 +1477,8 @@ export default function VintageCalligraphyApp({ session }) {
               </div>
               {notebookMode === 'preview' && (
                 <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
-                  onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveNote={saveNote}
-                  noteState={noteState} mobile={true} t={t} />
+                  onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveDoc={saveCurrentDocument}
+                  saveState={docSaveState} mobile={true} t={t} />
               )}
               <div className="flex-1 min-h-0" style={{ minHeight: '300px' }}>
                 {notebookMode === 'write'
@@ -1370,15 +1569,14 @@ export default function VintageCalligraphyApp({ session }) {
                 </div>
               </div>
             </div>
+          ) : notebookScreen === 'list' ? (
+            <div className="h-full overflow-y-auto">{renderDocumentList()}</div>
           ) : (
             <div className="max-w-6xl mx-auto h-full flex flex-col gap-4">
-              <div>
-                <h1 className="text-3xl font-bold text-ink-950 tracking-tight">{t('app_notebook_title')}</h1>
-                <p className="text-sm text-ink-500 mt-1">{t('app_notebook_sub')}</p>
-              </div>
+              {renderDocBackBar()}
               <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
-                onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveNote={saveNote}
-                noteState={noteState} mobile={false} t={t} />
+                onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveDoc={saveCurrentDocument}
+                saveState={docSaveState} mobile={false} t={t} />
               <div className="flex-1 min-h-0 grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5"><PenLine size={12} /> {t('app_write')}</p>
