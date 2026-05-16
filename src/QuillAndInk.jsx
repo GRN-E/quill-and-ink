@@ -11,7 +11,6 @@ import { supabase } from './supabase';
 import Logo from './components/Logo';
 import { useLang } from './i18n';
 
-// ============ MONGOLIAN CYRILLIC ALPHABET ============
 const UPPER = 'АБВГДЕЁЖЗИЙКЛМНОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯ'.split('');
 const LOWER = 'абвгдеёжзийклмноөпрстуүфхцчшщъыьэюя'.split('');
 const NUMS = '0123456789'.split('');
@@ -60,6 +59,7 @@ const PEN_COLORS = [
 ];
 const DEFAULT_PEN_COLOR = PEN_COLORS[0].hex;
 const EMPTY_RUNS = [{ text: '', color: DEFAULT_PEN_COLOR }];
+const blankPage = () => ({ runs: [{ text: '', color: DEFAULT_PEN_COLOR }] });
 
 const tintGlyphImage = (sourceImg, hex) => {
   const cv = document.createElement('canvas');
@@ -74,7 +74,6 @@ const tintGlyphImage = (sourceImg, hex) => {
   return cv;
 };
 
-// ============ PREVIEW CANVAS ============
 const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
   { runs, customAlphabet, settings, padding, emptyHint }, ref
 ) {
@@ -293,7 +292,6 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
   );
 });
 
-// ============ RICH TEXT EDITOR ============
 function RichTextEditor({ runs, setRuns, currentColor, setCurrentColor, mobile, t }) {
   const editorRef = useRef(null);
   const lastRangeRef = useRef(null);
@@ -435,7 +433,6 @@ function RichTextEditor({ runs, setRuns, currentColor, setCurrentColor, mobile, 
   );
 }
 
-// ============ NOTEBOOK TOOLBAR ============
 function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSaveDoc, saveState, mobile, t }) {
   const update = (key) => (e) => setSettings({ ...settings, [key]: Number(e.target.value) });
   const paperLabel = { blank: t('app_paper_blank'), lined: t('app_paper_lined'), dotted: t('app_paper_dotted'), grid: t('app_paper_grid') };
@@ -511,7 +508,6 @@ function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSa
   );
 }
 
-// ============ MAIN APP ============
 export default function VintageCalligraphyApp({ session }) {
   const navigate = useNavigate();
   const { t } = useLang();
@@ -535,16 +531,17 @@ export default function VintageCalligraphyApp({ session }) {
   const [editorMode, setEditorMode] = useState('draw');
   const [transformBox, setTransformBox] = useState(null);
 
-  // ---- Document system state ----
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [currentDoc, setCurrentDoc] = useState(null);
-  const [notebookScreen, setNotebookScreen] = useState('list'); // list | editor
+  const [docPages, setDocPages] = useState([]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [notebookScreen, setNotebookScreen] = useState('list');
   const [creatingNew, setCreatingNew] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
-  const [docSaveState, setDocSaveState] = useState('idle'); // idle | saving | saved
+  const [docSaveState, setDocSaveState] = useState('idle');
   const docLoadedRef = useRef(false);
 
   const transformImageRef = useRef(null);
@@ -558,7 +555,6 @@ export default function VintageCalligraphyApp({ session }) {
   const lastTime = useRef(0);
   const currentWidth = useRef(baseThickness);
 
-  // Load saved alphabet
   useEffect(() => {
     if (!session?.user) return;
     let cancelled = false;
@@ -570,7 +566,6 @@ export default function VintageCalligraphyApp({ session }) {
     return () => { cancelled = true; };
   }, [session?.user?.id]);
 
-  // Debounced save of alphabet
   useEffect(() => {
     if (syncing || !session?.user) return;
     const tm = setTimeout(async () => {
@@ -579,7 +574,6 @@ export default function VintageCalligraphyApp({ session }) {
     return () => clearTimeout(tm);
   }, [customAlphabet, session?.user?.id, syncing]);
 
-  // ---- Document operations ----
   const loadDocs = useCallback(async () => {
     if (!session?.user) return;
     setDocsLoading(true);
@@ -596,13 +590,18 @@ export default function VintageCalligraphyApp({ session }) {
     loadDocs();
   }, [loadDocs]);
 
+  const buildPagesWithCurrent = () => {
+    if (!docPages.length) return [{ runs }];
+    return docPages.map((p, i) => (i === pageIndex ? { runs } : p));
+  };
+
   const createDocument = async () => {
     if (!session?.user) return;
     const title = newTitle.trim() || 'Гарчиггүй';
-    const blankPages = [{ runs: [{ text: '', color: DEFAULT_PEN_COLOR }] }];
+    const pages = [blankPage()];
     const { data, error } = await supabase
       .from('documents')
-      .insert({ user_id: session.user.id, title, template: 'blank', pages: blankPages, settings: {} })
+      .insert({ user_id: session.user.id, title, template: 'blank', pages, settings: {} })
       .select()
       .single();
     if (error) { alert('Error: ' + error.message); return; }
@@ -614,12 +613,14 @@ export default function VintageCalligraphyApp({ session }) {
 
   const openDocument = (doc) => {
     setCurrentDoc(doc);
-    const pages = Array.isArray(doc.pages) ? doc.pages : [];
-    const firstRuns = pages[0]?.runs && Array.isArray(pages[0].runs) && pages[0].runs.length > 0
-      ? pages[0].runs
-      : [{ text: '', color: DEFAULT_PEN_COLOR }];
+    const raw = Array.isArray(doc.pages) && doc.pages.length > 0 ? doc.pages : [blankPage()];
+    const norm = raw.map((p) => ({
+      runs: Array.isArray(p?.runs) && p.runs.length > 0 ? p.runs : [{ text: '', color: DEFAULT_PEN_COLOR }],
+    }));
     docLoadedRef.current = false;
-    setRuns(firstRuns);
+    setDocPages(norm);
+    setPageIndex(0);
+    setRuns(norm[0].runs);
     setNotebookScreen('editor');
     setNotebookMode('write');
     setTimeout(() => { docLoadedRef.current = true; }, 300);
@@ -631,16 +632,45 @@ export default function VintageCalligraphyApp({ session }) {
     openDocument(data);
   };
 
+  const goToPage = (idx) => {
+    if (idx < 0 || idx >= docPages.length || idx === pageIndex) return;
+    const merged = buildPagesWithCurrent();
+    setDocPages(merged);
+    setPageIndex(idx);
+    setRuns(merged[idx].runs);
+  };
+
+  const addPage = () => {
+    const merged = buildPagesWithCurrent();
+    const bp = blankPage();
+    const np = [...merged.slice(0, pageIndex + 1), bp, ...merged.slice(pageIndex + 1)];
+    setDocPages(np);
+    setPageIndex(pageIndex + 1);
+    setRuns(bp.runs);
+  };
+
+  const deletePage = () => {
+    if (docPages.length <= 1) return;
+    if (!window.confirm(t('app_delete_page_confirm'))) return;
+    const merged = buildPagesWithCurrent();
+    const np = merged.filter((_, i) => i !== pageIndex);
+    const ni = Math.min(pageIndex, np.length - 1);
+    setDocPages(np);
+    setPageIndex(ni);
+    setRuns(np[ni].runs);
+  };
+
   const saveCurrentDocument = async () => {
     if (!session?.user || !currentDoc) return;
     setDocSaveState('saving');
     try {
-      const pages = [{ runs }];
+      const pages = buildPagesWithCurrent();
       const { error } = await supabase
         .from('documents')
         .update({ pages, title: currentDoc.title, updated_at: new Date().toISOString() })
         .eq('id', currentDoc.id);
       if (error) throw error;
+      setDocPages(pages);
       setDocSaveState('saved');
       setDocs((prev) => prev.map((d) => d.id === currentDoc.id ? { ...d, title: currentDoc.title, updated_at: new Date().toISOString() } : d));
       setTimeout(() => setDocSaveState('idle'), 1800);
@@ -650,18 +680,17 @@ export default function VintageCalligraphyApp({ session }) {
     }
   };
 
-  // Debounced autosave when editing a document
   useEffect(() => {
     if (!currentDoc || notebookScreen !== 'editor' || !docLoadedRef.current) return;
     const tm = setTimeout(async () => {
-      const pages = [{ runs }];
+      const pages = buildPagesWithCurrent();
       await supabase.from('documents')
         .update({ pages, updated_at: new Date().toISOString() })
         .eq('id', currentDoc.id);
       setDocs((prev) => prev.map((d) => d.id === currentDoc.id ? { ...d, updated_at: new Date().toISOString() } : d));
     }, 1500);
     return () => clearTimeout(tm);
-  }, [runs, currentDoc, notebookScreen]);
+  }, [runs, currentDoc, notebookScreen, pageIndex]);
 
   const renameDocument = async (id) => {
     const title = renameValue.trim();
@@ -683,8 +712,14 @@ export default function VintageCalligraphyApp({ session }) {
     }
   };
 
-  const backToDocList = () => {
+  const backToDocList = async () => {
+    if (currentDoc) {
+      const pages = buildPagesWithCurrent();
+      await supabase.from('documents').update({ pages, updated_at: new Date().toISOString() }).eq('id', currentDoc.id);
+    }
     setCurrentDoc(null);
+    setDocPages([]);
+    setPageIndex(0);
     setNotebookScreen('list');
     loadDocs();
   };
@@ -1049,52 +1084,154 @@ export default function VintageCalligraphyApp({ session }) {
     });
   };
 
+  const renderToCanvas = (pageRuns) => new Promise((resolve) => {
+    const wrap = previewCanvasRef.current?.getCanvas?.();
+    const W = wrap ? wrap.width / (window.devicePixelRatio || 1) : 800;
+    const padding = 28;
+    const s = notebookSettings;
+    const cap = s.capHeight;
+    const baseLetterSp = Math.max(1, Math.round(cap * 0.04));
+    const effLs = baseLetterSp + (s.letterSpacing - 1) * 4;
+    const wordGap = cap * s.wordSpacing;
+    const lineH = cap * s.lineHeight;
+    const maxX = W - padding;
+    const measure = document.createElement('canvas').getContext('2d');
+
+    const imgs = {};
+    const need = [];
+    Object.entries(customAlphabet).forEach(([ch, en]) => {
+      const sc = typeof en === 'string' ? en : en?.src;
+      if (sc) need.push([ch, sc]);
+    });
+    let pending = need.length;
+    const proceed = () => {
+      const chars = [];
+      pageRuns.forEach((r) => { for (const ch of r.text) chars.push({ ch, color: r.color }); });
+      const glyph = (it) => {
+        const cls = classifyChar(it.ch);
+        const tH = cap * (CLASS_HEIGHT[cls] ?? 1);
+        const drop = cap * (CLASS_DROP[cls] ?? 0);
+        const im = imgs[it.ch];
+        if (im) {
+          const asp = im.width / im.height || 1;
+          return { type: 'img', im, w: tH * asp, h: tH, drop };
+        }
+        const fs = tH * 1.35;
+        measure.font = `${fs}px Georgia, serif`;
+        return { type: 'text', ch: it.ch, w: measure.measureText(it.ch).width, h: tH, drop, fs, color: it.color };
+      };
+      const toks = [];
+      let bf = [];
+      const fl = () => { if (bf.length) { toks.push({ k: 'w', it: bf }); bf = []; } };
+      for (const it of chars) {
+        if (it.ch === '\n') { fl(); toks.push({ k: 'n' }); }
+        else if (it.ch === ' ' || it.ch === '\t') { fl(); toks.push({ k: 's' }); }
+        else bf.push(it);
+      }
+      fl();
+      const sized = toks.map((tk) => {
+        if (tk.k !== 'w') return tk;
+        const gs = tk.it.map(glyph);
+        let w = 0;
+        gs.forEach((g, i) => { w += g.w; if (i < gs.length - 1) w += effLs; });
+        return { ...tk, gs, w };
+      });
+      const lines = [];
+      let ln = [], cx = padding, st = true;
+      for (const tk of sized) {
+        if (tk.k === 'n') { lines.push(ln); ln = []; cx = padding; st = true; }
+        else if (tk.k === 's') { if (!st) { cx += wordGap; ln.push({ s: 1 }); } }
+        else {
+          if (cx + tk.w > maxX && !st) { lines.push(ln); ln = []; cx = padding; st = true; }
+          ln.push({ ...tk, x: cx }); cx += tk.w; st = false;
+        }
+      }
+      lines.push(ln);
+      const H = Math.max(600, padding * 2 + Math.max(1, lines.length) * lineH);
+      const cv = document.createElement('canvas');
+      const dpr = 2;
+      cv.width = W * dpr; cv.height = H * dpr;
+      const ctx = cv.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+      if (s.paperStyle === 'lined') {
+        ctx.strokeStyle = 'rgba(99,102,241,0.18)';
+        const vis = Math.ceil((H - padding) / lineH) + 1;
+        for (let i = 0; i < vis; i++) {
+          const y = Math.round(padding + (i + 1) * lineH - cap * 0.2) + 0.5;
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        }
+      }
+      ctx.textBaseline = 'alphabetic';
+      lines.forEach((lnn, li) => {
+        const by = padding + (li + 1) * lineH - cap * 0.2;
+        lnn.forEach((tk) => {
+          if (!tk.gs) return;
+          let x = tk.x;
+          tk.gs.forEach((g) => {
+            if (g.type === 'img') ctx.drawImage(g.im, x, by - g.h + g.drop, g.w, g.h);
+            else { ctx.fillStyle = g.color; ctx.font = `${g.fs}px Georgia, serif`; ctx.fillText(g.ch, x, by + g.drop); }
+            x += g.w + effLs;
+          });
+        });
+      });
+      resolve(cv);
+    };
+    if (pending === 0) { proceed(); return; }
+    need.forEach(([ch, sc]) => {
+      const im = new Image();
+      im.onload = () => { imgs[ch] = im; if (--pending === 0) proceed(); };
+      im.onerror = () => { if (--pending === 0) proceed(); };
+      im.src = sc;
+    });
+  });
+
   const exportNotebookPNG = () => {
     const cv = previewCanvasRef.current?.getCanvas?.();
     if (!cv) { alert(t('app_no_glyphs')); return; }
     const totalText = runs.map((r) => r.text).join('');
     if (!totalText.trim()) { alert(t('app_empty_hint')); return; }
     const link = document.createElement('a');
-    link.download = (currentDoc?.title || 'inkly-notebook') + '.png';
+    link.download = (currentDoc?.title || 'inkly') + '-' + (pageIndex + 1) + '.png';
     link.href = cv.toDataURL('image/png');
     link.click();
   };
 
-  const exportNotebookPDF = () => {
-    const cv = previewCanvasRef.current?.getCanvas?.();
-    if (!cv) { alert(t('app_no_glyphs')); return; }
-    const totalText = runs.map((r) => r.text).join('');
-    if (!totalText.trim()) { alert(t('app_empty_hint')); return; }
-    const imgData = cv.toDataURL('image/png');
+  const exportNotebookPDF = async () => {
+    const pages = buildPagesWithCurrent();
+    const nonEmpty = pages.filter((p) => p.runs.map((r) => r.text).join('').trim());
+    if (nonEmpty.length === 0) { alert(t('app_empty_hint')); return; }
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
     const margin = 36;
     const usableW = pageW - margin * 2;
     const usableH = pageH - margin * 2;
-    const imgW = usableW;
-    const imgH = (cv.height / cv.width) * imgW;
-    if (imgH <= usableH) {
-      pdf.addImage(imgData, 'PNG', margin, margin, imgW, imgH);
-    } else {
-      let remaining = cv.height;
-      let srcY = 0;
-      const pxPerPage = (usableH / imgW) * cv.width;
-      while (remaining > 0) {
-        const sliceH = Math.min(pxPerPage, remaining);
-        const slice = document.createElement('canvas');
-        slice.width = cv.width;
-        slice.height = sliceH;
-        slice.getContext('2d').drawImage(cv, 0, srcY, cv.width, sliceH, 0, 0, cv.width, sliceH);
-        const sliceData = slice.toDataURL('image/png');
-        const sliceImgH = (sliceH / cv.width) * imgW;
-        pdf.addImage(sliceData, 'PNG', margin, margin, imgW, sliceImgH);
-        remaining -= sliceH;
-        srcY += sliceH;
-        if (remaining > 0) pdf.addPage();
+    for (let i = 0; i < pages.length; i++) {
+      const cv = await renderToCanvas(pages[i].runs);
+      const imgData = cv.toDataURL('image/png');
+      const imgW = usableW;
+      const imgH = (cv.height / cv.width) * imgW;
+      if (i > 0) pdf.addPage();
+      if (imgH <= usableH) {
+        pdf.addImage(imgData, 'PNG', margin, margin, imgW, imgH);
+      } else {
+        let remaining = cv.height, srcY = 0;
+        const pxPerPage = (usableH / imgW) * cv.width;
+        let first = true;
+        while (remaining > 0) {
+          const sliceH = Math.min(pxPerPage, remaining);
+          const slice = document.createElement('canvas');
+          slice.width = cv.width; slice.height = sliceH;
+          slice.getContext('2d').drawImage(cv, 0, srcY, cv.width, sliceH, 0, 0, cv.width, sliceH);
+          if (!first) pdf.addPage();
+          pdf.addImage(slice.toDataURL('image/png'), 'PNG', margin, margin, imgW, (sliceH / cv.width) * imgW);
+          remaining -= sliceH; srcY += sliceH; first = false;
+        }
       }
     }
-    pdf.save((currentDoc?.title || 'inkly-notebook') + '.pdf');
+    pdf.save((currentDoc?.title || 'inkly') + '.pdf');
   };
 
   const drawingHint = () => {
@@ -1366,6 +1503,34 @@ export default function VintageCalligraphyApp({ session }) {
     </div>
   );
 
+  const renderPageBar = () => (
+    <div className="flex items-center justify-between gap-2 flex-wrap rounded-xl bg-white border border-ink-200 p-2">
+      <div className="flex items-center gap-1">
+        <button onClick={() => goToPage(pageIndex - 1)} disabled={pageIndex === 0}
+          className="p-1.5 rounded-md hover:bg-ink-100 transition-base text-ink-600 disabled:opacity-40 disabled:hover:bg-transparent">
+          <ChevronLeft size={16} />
+        </button>
+        <span className="text-xs font-semibold text-ink-700 px-2">
+          {t('app_page')} {pageIndex + 1} {t('app_page_of')} {docPages.length}
+        </span>
+        <button onClick={() => goToPage(pageIndex + 1)} disabled={pageIndex >= docPages.length - 1}
+          className="p-1.5 rounded-md hover:bg-ink-100 transition-base text-ink-600 disabled:opacity-40 disabled:hover:bg-transparent">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button onClick={addPage}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition-base">
+          <Plus size={12} /> {t('app_add_page')}
+        </button>
+        <button onClick={deletePage} disabled={docPages.length <= 1}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 transition-base disabled:opacity-40">
+          <Trash2 size={12} /> <span className="hidden sm:inline">{t('app_delete_page')}</span>
+        </button>
+      </div>
+    </div>
+  );
+
   const inTransform = editorMode === 'transform';
 
   if (isMobile) {
@@ -1467,6 +1632,7 @@ export default function VintageCalligraphyApp({ session }) {
           ) : (
             <div className="flex-1 min-h-0 flex flex-col p-3 gap-2 overflow-y-auto">
               {renderDocBackBar()}
+              {renderPageBar()}
               <div className="flex gap-1 flex-shrink-0">
                 <button onClick={() => setNotebookMode('write')} className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-base inline-flex items-center justify-center gap-1.5 ${notebookMode === 'write' ? 'bg-brand-600 text-white' : 'text-ink-600 border border-ink-200 bg-white'}`}>
                   <PenLine size={12} /> {t('app_write')}
@@ -1574,6 +1740,7 @@ export default function VintageCalligraphyApp({ session }) {
           ) : (
             <div className="max-w-6xl mx-auto h-full flex flex-col gap-4">
               {renderDocBackBar()}
+              {renderPageBar()}
               <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
                 onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveDoc={saveCurrentDocument}
                 saveState={docSaveState} mobile={false} t={t} />
