@@ -21,7 +21,6 @@ const CATEGORIES = {
 };
 const ALL_CHARS = [...UPPER, ...LOWER, ...NUMS];
 
-// Cyrillic descenders / ascenders (handwriting approximation)
 const CYR_DESCENDERS = 'руфцщ';
 const CYR_ASCENDERS = 'б';
 
@@ -36,28 +35,16 @@ const classifyChar = (ch) => {
   return 'cap';
 };
 
-const ZONE_LAYOUT = { ascender: 0.20, cap: 0.45, xheight: 0.20, descender: 0.15 };
-const TOP = 0;
-const CAP_LINE = ZONE_LAYOUT.ascender;
-const X_HEIGHT_LINE = CAP_LINE + ZONE_LAYOUT.cap;
-const BASELINE = X_HEIGHT_LINE + ZONE_LAYOUT.xheight;
-const DESCENDER_LINE = BASELINE + ZONE_LAYOUT.descender;
+// Relative target heights (cap = 1.0). Used to scale captured ink at render time.
+const CLASS_HEIGHT = { cap: 1.0, ascender: 1.0, xheight: 0.62, descender: 0.78 };
+// How far below the baseline a class drops (fraction of cap height)
+const CLASS_DROP = { cap: 0, ascender: 0, xheight: 0, descender: 0.30 };
 
-const getCaptureRegion = (cls) => {
-  if (cls === 'cap') return { top: CAP_LINE, bottom: BASELINE };
-  if (cls === 'xheight') return { top: X_HEIGHT_LINE, bottom: BASELINE };
-  if (cls === 'ascender') return { top: TOP, bottom: BASELINE };
-  if (cls === 'descender') return { top: X_HEIGHT_LINE, bottom: DESCENDER_LINE };
-  return { top: CAP_LINE, bottom: BASELINE };
-};
-const getRenderHeight = (cls) => {
-  if (cls === 'cap') return 1.0;
-  if (cls === 'xheight') return ZONE_LAYOUT.xheight / ZONE_LAYOUT.cap;
-  if (cls === 'ascender') return (ZONE_LAYOUT.ascender + ZONE_LAYOUT.cap + ZONE_LAYOUT.xheight) / ZONE_LAYOUT.cap;
-  if (cls === 'descender') return (ZONE_LAYOUT.xheight + ZONE_LAYOUT.descender) / ZONE_LAYOUT.cap;
-  return 1.0;
-};
-const getDescenderDrop = (cls) => (cls === 'descender' ? ZONE_LAYOUT.descender / ZONE_LAYOUT.cap : 0);
+// Visual guide line positions in the editor (fractions of canvas height)
+const GUIDE_CAP = 0.18;
+const GUIDE_XHEIGHT = 0.45;
+const GUIDE_BASELINE = 0.78;
+const GUIDE_DESC = 0.93;
 
 const PAPER_STYLES = ['blank', 'lined', 'dotted', 'grid'];
 const DEFAULT_NOTEBOOK_SETTINGS = {
@@ -150,11 +137,12 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
       for (const ch of run.text) charsWithColor.push({ ch, color: run.color });
     });
 
+    // Each glyph: scale captured ink to the class target height.
     const getGlyph = (item) => {
       const { ch, color } = item;
       const cls = classifyChar(ch);
-      const renderH = capHeight * getRenderHeight(cls);
-      const drop = capHeight * getDescenderDrop(cls);
+      const targetH = capHeight * (CLASS_HEIGHT[cls] ?? 1.0);
+      const drop = capHeight * (CLASS_DROP[cls] ?? 0);
       const entry = customAlphabet[ch];
       const src = typeof entry === 'string' ? entry : entry?.src;
       if (src) {
@@ -163,13 +151,15 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
           const nW = tinted.naturalWidth || tinted.width;
           const nH = tinted.naturalHeight || tinted.height;
           const aspect = nW / nH || 1;
-          return { type: 'img', img: tinted, w: renderH * aspect, h: renderH, drop, ch, cls, color };
+          // Scale so the glyph's height equals targetH; width follows aspect
+          return { type: 'img', img: tinted, w: targetH * aspect, h: targetH, drop, ch, cls, color };
         }
       }
-      const fontSize = renderH * 1.05;
+      // Fallback: render the actual character in Georgia, sized to the SAME targetH
+      const fontSize = targetH * 1.35; // Georgia cap height is ~0.7 of font size
       measureCtx.font = `${fontSize}px Georgia, serif`;
       const w = measureCtx.measureText(ch).width;
-      return { type: 'text', ch, w, h: renderH, drop, fontSize, cls, color };
+      return { type: 'text', ch, w, h: targetH, drop, fontSize, cls, color };
     };
 
     const tokens = [];
@@ -270,6 +260,7 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
           ctx.rotate(rot);
           ctx.translate(-(x + g.w / 2), -baselineY);
           if (g.type === 'img') {
+            // Bottom of glyph sits at baseline + its drop; top is baseline - h + drop
             const top = baselineY - g.h + g.drop;
             ctx.drawImage(g.img, x, top + wobble, g.w, g.h);
           } else {
@@ -387,7 +378,7 @@ function RichTextEditor({ runs, setRuns, currentColor, setCurrentColor, mobile, 
         if (i < segs.length - 1) editor.appendChild(document.createElement('br'));
       });
     });
-  }, []);
+  }, [runs]);
 
   const applyColor = (color) => {
     const editor = editorRef.current;
@@ -590,6 +581,7 @@ export default function VintageCalligraphyApp({ session }) {
     transformImageRef.current = null;
   }, [activeLetter, activeView]);
 
+  // Render the saved letter back, centered on the baseline guide, at a sensible size
   useEffect(() => {
     if (activeView !== 'editor' || editorMode !== 'draw') return;
     const id = requestAnimationFrame(() => {
@@ -615,16 +607,21 @@ export default function VintageCalligraphyApp({ session }) {
       if (src) {
         const img = new Image();
         img.onload = () => {
-          const region = getCaptureRegion(activeClass);
-          const zoneTop = region.top * h;
-          const zoneHeight = region.bottom * h - zoneTop;
-          ctx.drawImage(img, 0, zoneTop, w, zoneHeight);
+          // Place the saved ink between cap line and baseline, preserving aspect
+          const capY = GUIDE_CAP * h;
+          const baseY = GUIDE_BASELINE * h;
+          const zoneH = baseY - capY;
+          const aspect = (img.naturalWidth || img.width) / (img.naturalHeight || img.height) || 1;
+          const drawH = zoneH;
+          const drawW = drawH * aspect;
+          const drawX = (w - drawW) / 2;
+          ctx.drawImage(img, drawX, capY, drawW, drawH);
         };
         img.src = src;
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [activeLetter, activeView, isMobile, showSliders, editorMode, customAlphabet, activeClass]);
+  }, [activeLetter, activeView, isMobile, showSliders, editorMode, customAlphabet]);
 
   useEffect(() => {
     if (editorMode !== 'transform' || !transformBox || !transformImageRef.current) return;
@@ -795,40 +792,46 @@ export default function VintageCalligraphyApp({ session }) {
       return next;
     });
   };
+
+  // FIXED SAVE: capture the EXACT bounding box of all ink — nothing clipped.
   const saveLetter = () => {
     const src = canvasRef.current;
     const ctx = src.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     const w = src.width, h = src.height;
-    const region = getCaptureRegion(activeClass);
-    const zoneTopPx = Math.floor(region.top * h);
-    const zoneBottomPx = Math.ceil(region.bottom * h);
-    const zoneHeight = zoneBottomPx - zoneTopPx;
     const data = ctx.getImageData(0, 0, w, h).data;
-    let drew = false;
-    for (let i = 3; i < data.length; i += 4) if (data[i] > 10) { drew = true; break; }
-    if (!drew) { alert(t('app_empty_hint')); return; }
-    let minX = w, maxX = 0;
-    for (let y = zoneTopPx; y < zoneBottomPx; y++)
-      for (let x = 0; x < w; x++)
-        if (data[(y * w + x) * 4 + 3] > 10) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
-    for (let i = 3; i < data.length; i += 4)
-      if (data[i] > 10) { const x = Math.floor((i / 4) % w); if (x < minX) minX = x; if (x > maxX) maxX = x; }
-    if (minX >= maxX) { alert(t('app_empty_hint')); return; }
-    const padX = Math.round(4 * dpr);
-    minX = Math.max(0, minX - padX);
-    maxX = Math.min(w, maxX + padX);
-    const cw = maxX - minX, ch = zoneHeight;
+    let minX = w, minY = h, maxX = 0, maxY = 0, found = false;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] > 10) {
+          found = true;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (!found) { alert(t('app_empty_hint')); return; }
+    // Small padding so strokes at the edge aren't visually cut
+    const pad = Math.round(3 * dpr);
+    minX = Math.max(0, minX - pad);
+    minY = Math.max(0, minY - pad);
+    maxX = Math.min(w, maxX + pad);
+    maxY = Math.min(h, maxY + pad);
+    const cw = maxX - minX;
+    const ch = maxY - minY;
     const tmp = document.createElement('canvas');
     tmp.width = cw;
     tmp.height = ch;
-    tmp.getContext('2d').drawImage(src, minX, zoneTopPx, cw, ch, 0, 0, cw, ch);
+    tmp.getContext('2d').drawImage(src, minX, minY, cw, ch, 0, 0, cw, ch);
     const dataUrl = tmp.toDataURL('image/png');
     setCustomAlphabet((prev) => ({ ...prev, [activeLetter]: { src: dataUrl, cls: activeClass } }));
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1200);
     if (editorMode === 'transform') exitTransformMode();
   };
+
   const goToNextLetter = () => {
     const list = CATEGORIES[activeCategory].chars;
     const idx = list.indexOf(activeLetter);
@@ -940,26 +943,23 @@ export default function VintageCalligraphyApp({ session }) {
     navigate('/');
   };
 
-  const renderEditorGuides = () => {
-    const region = getCaptureRegion(activeClass);
-    return (
-      <div className="absolute inset-0 pointer-events-none">
-        {region.top > 0 && (
-          <div className="absolute left-0 right-0 top-0" style={{ height: `${region.top * 100}%`, background: 'rgba(245,245,245,0.6)', borderBottom: '1px dashed rgba(99,102,241,0.3)' }} />
-        )}
-        {region.bottom < 1 && (
-          <div className="absolute left-0 right-0" style={{ top: `${region.bottom * 100}%`, height: `${(1 - region.bottom) * 100}%`, background: 'rgba(245,245,245,0.6)', borderTop: '1px dashed rgba(99,102,241,0.3)' }} />
-        )}
-        <div className="absolute left-0 right-0" style={{ top: `${CAP_LINE * 100}%`, borderTop: (activeClass === 'cap' || activeClass === 'ascender') ? '2px solid rgba(99,102,241,0.55)' : '1px dashed rgba(99,102,241,0.35)' }} />
-        <div className="absolute left-0 right-0" style={{ top: `${X_HEIGHT_LINE * 100}%`, borderTop: (activeClass === 'xheight' || activeClass === 'descender') ? '2px solid rgba(99,102,241,0.55)' : '1px dashed rgba(99,102,241,0.35)' }} />
-        <div className="absolute left-0 right-0" style={{ top: `${BASELINE * 100}%`, borderTop: '2px solid rgba(99,102,241,0.7)' }} />
-        <div className="absolute left-0 right-0" style={{ top: `${DESCENDER_LINE * 100}%`, borderTop: activeClass === 'descender' ? '2px solid rgba(99,102,241,0.55)' : '1px dashed rgba(99,102,241,0.35)' }} />
-        <div className="absolute right-3 px-2 py-0.5 rounded text-[10px] font-bold bg-brand-600 text-white" style={{ top: `${region.top * 100 + 0.5}%` }}>
-          {activeClass.toUpperCase()}
-        </div>
+  // Editor guide lines — reference only, drawing is free (Option 1)
+  const renderEditorGuides = () => (
+    <div className="absolute inset-0 pointer-events-none">
+      <div className="absolute left-0 right-0" style={{ top: `${GUIDE_CAP * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}>
+        <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1.5 rounded">cap</span>
       </div>
-    );
-  };
+      <div className="absolute left-0 right-0" style={{ top: `${GUIDE_XHEIGHT * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}>
+        <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1.5 rounded">x</span>
+      </div>
+      <div className="absolute left-0 right-0" style={{ top: `${GUIDE_BASELINE * 100}%`, borderTop: '2px solid rgba(99,102,241,0.6)' }}>
+        <span className="absolute left-3 -top-4 text-[10px] font-bold text-brand-700 bg-white px-1.5 rounded">baseline</span>
+      </div>
+      <div className="absolute left-0 right-0" style={{ top: `${GUIDE_DESC * 100}%`, borderTop: '1px dashed rgba(99,102,241,0.35)' }}>
+        <span className="absolute left-3 -top-3 text-[10px] font-semibold text-brand-700 bg-white px-1.5 rounded">desc</span>
+      </div>
+    </div>
+  );
 
   const renderTransformOverlay = () => {
     if (editorMode !== 'transform' || !transformBox) return null;
@@ -1095,7 +1095,6 @@ export default function VintageCalligraphyApp({ session }) {
 
   const inTransform = editorMode === 'transform';
 
-  // MOBILE
   if (isMobile) {
     return (
       <div className="flex flex-col bg-ink-50" style={{ height: '100dvh', paddingTop: 'env(safe-area-inset-top,0px)', paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
@@ -1226,7 +1225,6 @@ export default function VintageCalligraphyApp({ session }) {
     );
   }
 
-  // DESKTOP
   return (
     <div className="flex flex-col h-screen bg-ink-50">
       {renderTopBar()}
