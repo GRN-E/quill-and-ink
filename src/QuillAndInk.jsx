@@ -1255,6 +1255,10 @@ const openDocument = (doc) => {
   };
 
   const exportNotebookPDF = async () => {
+    if (!planConf.pdfExport) {
+      if (window.confirm(t('app_golden_only'))) navigate('/pricing');
+      return;
+    }
     const pages = buildPagesWithCurrent();
     const nonEmpty = pages.filter((p) => p.runs.map((r) => r.text).join('').trim());
     if (nonEmpty.length === 0) { alert(t('app_empty_hint')); return; }
