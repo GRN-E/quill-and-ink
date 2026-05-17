@@ -1434,6 +1434,10 @@ const openDocument = (doc) => {
             <p className="text-xs text-ink-500">{t('app_signed_in_as')}</p>
             <p className="text-sm font-medium text-ink-950 truncate">{session?.user?.email}</p>
           </div>
+          <button onClick={() => { navigate('/account'); setUserMenuOpen(false); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 transition-base text-left">
+            <Settings size={14} /> <span>{t('app_account')}</span>
+          </button>
           <button onClick={() => { navigate('/'); setUserMenuOpen(false); }}
             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 transition-base text-left">
             <Home size={14} /> <span>{t('app_marketing_site')}</span>
