@@ -10,6 +10,8 @@ import { jsPDF } from 'jspdf';
 import { supabase } from './supabase';
 import Logo from './components/Logo';
 import { useLang } from './i18n';
+import { usePlan } from './PlanContext';
+import { getPlan } from './planLimits';
 
 const UPPER = 'АБВГДЕЁЖЗИЙКЛМНОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯ'.split('');
 const LOWER = 'абвгдеёжзийклмноөпрстуүфхцчшщъыьэюя'.split('');
@@ -531,6 +533,9 @@ function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSa
 export default function VintageCalligraphyApp({ session }) {
   const navigate = useNavigate();
   const { t } = useLang();
+  const { plan } = usePlan();
+  const planConf = getPlan(plan);
+  const maxDocs = planConf.maxDocuments;
 
   const [customAlphabet, setCustomAlphabet] = useState({});
   const [syncing, setSyncing] = useState(true);
@@ -621,6 +626,7 @@ export default function VintageCalligraphyApp({ session }) {
 
   const createDocument = async (templateId) => {
     if (!session?.user) return;
+    if (docs.length >= maxDocs) { alert(t('app_limit_docs_body').replace('{max}', String(maxDocs))); return; }
     const tpl = TEMPLATES.find((x) => x.id === templateId) || TEMPLATES[0];
     const title = newTitle.trim() || t(tpl.nameKey);
     const body = tpl.bodyKey ? t(tpl.bodyKey) : '';
@@ -1460,9 +1466,9 @@ const openDocument = (doc) => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-ink-950 tracking-tight">{t('app_documents')}</h1>
-          <p className="text-sm text-ink-500 mt-1">{docs.length} / 10</p>
+          <p className="text-sm text-ink-500 mt-1">{docs.length} / {maxDocs}</p>
         </div>
-        {!creatingNew && docs.length < 10 && (
+        {!creatingNew && docs.length < maxDocs && (
           <button onClick={() => { setCreatingNew(true); setNewTitle(''); }}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 shadow-card transition-base">
             <Plus size={15} /> {t('app_new_document')}
@@ -1470,7 +1476,18 @@ const openDocument = (doc) => {
         )}
       </div>
 
-     {creatingNew && (
+     {!creatingNew && docs.length >= maxDocs && planConf.id === 'free' && (
+        <div className="rounded-xl bg-amber-50 border border-amber-200 p-5">
+          <p className="text-sm font-semibold text-amber-900">{t('app_limit_docs_title')}</p>
+          <p className="text-sm text-amber-800 mt-1">{t('app_limit_docs_body').replace('{max}', String(maxDocs))}</p>
+          <button onClick={() => navigate('/pricing')}
+            className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition-base">
+            {t('hero_cta_secondary')}
+          </button>
+        </div>
+      )}
+
+      {creatingNew && (
         <div className="rounded-xl bg-white border border-ink-200 p-4 flex flex-col gap-3">
           <label className="text-xs font-semibold uppercase tracking-wider text-ink-600">{t('app_doc_title_label')}</label>
           <input autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
