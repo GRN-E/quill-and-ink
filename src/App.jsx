@@ -7,6 +7,7 @@ import Auth from './Auth';
 import QuillAndInk from './QuillAndInk';
 import Landing from './pages/Landing';
 import Pricing from './pages/Pricing';
+import Upgrade from './pages/Upgrade';
 import About from './pages/About';
 
 function useSession() {
@@ -65,6 +66,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Landing session={session} />} />
             <Route path="/pricing" element={<Pricing session={session} />} />
+            <Route path="/upgrade" element={<Upgrade session={session} />} />
             <Route path="/about" element={<About session={session} />} />
             <Route
               path="/login"
