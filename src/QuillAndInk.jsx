@@ -620,12 +620,17 @@ export default function VintageCalligraphyApp({ session }) {
     openDocument(data);
   };
 
-  const openDocument = (doc) => {
+const openDocument = (doc) => {
     setCurrentDoc(doc);
     const raw = Array.isArray(doc.pages) && doc.pages.length > 0 ? doc.pages : [blankPage()];
     const norm = raw.map((p) => ({
       runs: Array.isArray(p?.runs) && p.runs.length > 0 ? p.runs : [{ text: '', color: DEFAULT_PEN_COLOR }],
     }));
+    const st = doc.settings && typeof doc.settings === 'object' ? doc.settings : {};
+    const nb = st.nb && typeof st.nb === 'object'
+      ? { ...DEFAULT_NOTEBOOK_SETTINGS, ...st.nb }
+      : DEFAULT_NOTEBOOK_SETTINGS;
+    setNotebookSettings(nb);
     docLoadedRef.current = false;
     setDocPages(norm);
     setPageIndex(0);
@@ -676,7 +681,7 @@ export default function VintageCalligraphyApp({ session }) {
       const pages = buildPagesWithCurrent();
       const { error } = await supabase
         .from('documents')
-        .update({ pages, title: currentDoc.title, updated_at: new Date().toISOString() })
+        .update({ pages, title: currentDoc.title, settings: { nb: notebookSettings }, updated_at: new Date().toISOString() })
         .eq('id', currentDoc.id);
       if (error) throw error;
       setDocPages(pages);
@@ -694,12 +699,12 @@ export default function VintageCalligraphyApp({ session }) {
     const tm = setTimeout(async () => {
       const pages = buildPagesWithCurrent();
       await supabase.from('documents')
-        .update({ pages, updated_at: new Date().toISOString() })
+        .update({ pages, settings: { nb: notebookSettings }, updated_at: new Date().toISOString() })
         .eq('id', currentDoc.id);
       setDocs((prev) => prev.map((d) => d.id === currentDoc.id ? { ...d, updated_at: new Date().toISOString() } : d));
     }, 1500);
     return () => clearTimeout(tm);
-  }, [runs, currentDoc, notebookScreen, pageIndex]);
+  }, [runs, currentDoc, notebookScreen, pageIndex, notebookSettings]);
 
   const renameDocument = async (id) => {
     const title = renameValue.trim();
@@ -724,7 +729,7 @@ export default function VintageCalligraphyApp({ session }) {
   const backToDocList = async () => {
     if (currentDoc) {
       const pages = buildPagesWithCurrent();
-      await supabase.from('documents').update({ pages, updated_at: new Date().toISOString() }).eq('id', currentDoc.id);
+      await supabase.from('documents').update({ pages, settings: { nb: notebookSettings }, updated_at: new Date().toISOString() }).eq('id', currentDoc.id);
     }
     setCurrentDoc(null);
     setDocPages([]);
