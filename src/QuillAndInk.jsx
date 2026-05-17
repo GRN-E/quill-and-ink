@@ -82,7 +82,7 @@ const tintGlyphImage = (sourceImg, hex) => {
 };
 
 const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
-  { runs, customAlphabet, settings, padding, emptyHint }, ref
+  { runs, customAlphabet, settings, padding, emptyHint, header }, ref
 ) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
@@ -207,8 +207,9 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
     }
     lines.push(line);
 
+    const headBand = header && header.trim() ? Math.round(capHeight * 1.6) : 0;
     const minH = wrap.clientHeight || 200;
-    const contentH = padding * 2 + Math.max(1, lines.length) * lineH;
+    const contentH = padding * 2 + headBand + Math.max(1, lines.length) * lineH;
     const H = Math.max(minH, contentH);
     canvas.width = W * dpr;
     canvas.height = H * dpr;
@@ -248,9 +249,21 @@ const CalligraphyCanvas = React.forwardRef(function CalligraphyCanvas(
       }
     }
 
+    if (headBand > 0) {
+      ctx.fillStyle = '#0a0a0a';
+      ctx.font = `600 ${Math.round(capHeight * 0.85)}px Inter, system-ui, sans-serif`;
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(header.trim(), padding, padding + capHeight);
+      ctx.strokeStyle = 'rgba(10,10,10,0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding, padding + headBand - 8);
+      ctx.lineTo(W - padding, padding + headBand - 8);
+      ctx.stroke();
+    }
     ctx.textBaseline = 'alphabetic';
     lines.forEach((ln, li) => {
-      const baselineY = padding + (li + 1) * lineH - capHeight * 0.2;
+      const baselineY = padding + headBand + (li + 1) * lineH - capHeight * 0.2;
       ln.forEach((tk) => {
         if (tk.kind !== 'word') return;
         let x = tk.x;
@@ -549,6 +562,7 @@ export default function VintageCalligraphyApp({ session }) {
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [docSaveState, setDocSaveState] = useState('idle');
+  const [docHeader, setDocHeader] = useState('');
   const docLoadedRef = useRef(false);
 
   const transformImageRef = useRef(null);
@@ -631,6 +645,7 @@ const openDocument = (doc) => {
       ? { ...DEFAULT_NOTEBOOK_SETTINGS, ...st.nb }
       : DEFAULT_NOTEBOOK_SETTINGS;
     setNotebookSettings(nb);
+    setDocHeader(typeof st.header === 'string' ? st.header : '');
     docLoadedRef.current = false;
     setDocPages(norm);
     setPageIndex(0);
@@ -681,7 +696,7 @@ const openDocument = (doc) => {
       const pages = buildPagesWithCurrent();
       const { error } = await supabase
         .from('documents')
-        .update({ pages, title: currentDoc.title, settings: { nb: notebookSettings }, updated_at: new Date().toISOString() })
+        .update({ pages, title: currentDoc.title, settings: { nb: notebookSettings, header: docHeader }, updated_at: new Date().toISOString() })
         .eq('id', currentDoc.id);
       if (error) throw error;
       setDocPages(pages);
@@ -699,17 +714,17 @@ const openDocument = (doc) => {
     const tm = setTimeout(async () => {
       const pages = buildPagesWithCurrent();
       await supabase.from('documents')
-        .update({ pages, settings: { nb: notebookSettings }, updated_at: new Date().toISOString() })
+        .update({ pages, settings: { nb: notebookSettings, header: docHeader }, updated_at: new Date().toISOString() })
         .eq('id', currentDoc.id);
       setDocs((prev) => prev.map((d) => d.id === currentDoc.id ? { ...d, updated_at: new Date().toISOString() } : d));
     }, 1500);
     return () => clearTimeout(tm);
-  }, [runs, currentDoc, notebookScreen, pageIndex, notebookSettings]);
+  }, [runs, currentDoc, notebookScreen, pageIndex, notebookSettings, docHeader]);
 
   const renameDocument = async (id) => {
     const title = renameValue.trim();
     if (!title) { setRenamingId(null); return; }
-    await supabase.from('documents').update({ title, updated_at: new Date().toISOString() }).eq('id', id);
+    await supabase.from('documents').update({ pages, settings: { nb: notebookSettings, header: docHeader }, updated_at: new Date().toISOString() }).eq('id', currentDoc.id);
     setRenamingId(null);
     setRenameValue('');
     setDocs((prev) => prev.map((d) => d.id === id ? { ...d, title } : d));
@@ -729,7 +744,7 @@ const openDocument = (doc) => {
   const backToDocList = async () => {
     if (currentDoc) {
       const pages = buildPagesWithCurrent();
-      await supabase.from('documents').update({ pages, settings: { nb: notebookSettings }, updated_at: new Date().toISOString() }).eq('id', currentDoc.id);
+      await supabase.from('documents').update({ pages, title: currentDoc.title, settings: { nb: notebookSettings, header: docHeader }, updated_at: new Date().toISOString() }).eq('id', currentDoc.id);
     }
     setCurrentDoc(null);
     setDocPages([]);
@@ -1098,7 +1113,7 @@ const openDocument = (doc) => {
     });
   };
 
-  const renderToCanvas = (pageRuns) => new Promise((resolve) => {
+    const renderToCanvas = (pageRuns, headerText) => new Promise((resolve) => {
     const wrap = previewCanvasRef.current?.getCanvas?.();
     const W = wrap ? wrap.width / (window.devicePixelRatio || 1) : 800;
     const padding = 28;
@@ -1161,7 +1176,8 @@ const openDocument = (doc) => {
         }
       }
       lines.push(ln);
-      const H = Math.max(600, padding * 2 + Math.max(1, lines.length) * lineH);
+      const headBand = headerText && headerText.trim() ? Math.round(cap * 1.6) : 0;       
+      const H = Math.max(600, padding * 2 + headBand + Math.max(1, lines.length) * lineH);
       const cv = document.createElement('canvas');
       const dpr = 2;
       cv.width = W * dpr; cv.height = H * dpr;
@@ -1177,9 +1193,15 @@ const openDocument = (doc) => {
           ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
         }
       }
+      if (headBand > 0) {
+        ctx.fillStyle = '#0a0a0a';
+        ctx.font = `600 ${Math.round(cap * 0.85)}px Inter, system-ui, sans-serif`;
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(headerText.trim(), padding, padding + cap);
+      }
       ctx.textBaseline = 'alphabetic';
       lines.forEach((lnn, li) => {
-        const by = padding + (li + 1) * lineH - cap * 0.2;
+        const by = padding + headBand + (li + 1) * lineH - cap * 0.2;
         lnn.forEach((tk) => {
           if (!tk.gs) return;
           let x = tk.x;
@@ -1223,7 +1245,7 @@ const openDocument = (doc) => {
     const usableW = pageW - margin * 2;
     const usableH = pageH - margin * 2;
     for (let i = 0; i < pages.length; i++) {
-      const cv = await renderToCanvas(pages[i].runs);
+      const cv = await renderToCanvas(pages[i].runs, docHeader);
       const imgData = cv.toDataURL('image/png');
       const imgW = usableW;
       const imgH = (cv.height / cv.width) * imgW;
@@ -1401,7 +1423,7 @@ const openDocument = (doc) => {
     return (
       <div className="h-full flex flex-col gap-2">
         <div className="flex-1 min-h-0">
-          <CalligraphyCanvas ref={previewCanvasRef} runs={runs} customAlphabet={customAlphabet} settings={eff} padding={isM ? 14 : 28} emptyHint={t('app_empty_hint')} />
+          <CalligraphyCanvas ref={previewCanvasRef} runs={runs} customAlphabet={customAlphabet} settings={eff} padding={isM ? 14 : 28} emptyHint={t('app_empty_hint')} header={docHeader} />
         </div>
         <p className="text-xs text-ink-500 text-center">
           {completedCount === 0 ? t('app_no_glyphs') : `${counts.uppercase}/${UPPER.length} · ${counts.lowercase}/${LOWER.length} · ${counts.numbers}/${NUMS.length}`}
@@ -1513,13 +1535,22 @@ const openDocument = (doc) => {
   );
 
   const renderDocBackBar = () => (
-    <div className="flex items-center justify-between gap-3 flex-wrap">
-      <button onClick={backToDocList}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-ink-200 text-sm font-medium text-ink-700 hover:bg-ink-50 transition-base">
-        <ArrowLeft size={14} /> {t('app_back_to_docs')}
-      </button>
-      <p className="text-base font-semibold text-ink-950 truncate flex-1 text-center">{currentDoc?.title}</p>
-      <div className="w-[120px] hidden sm:block" />
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <button onClick={backToDocList}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-ink-200 text-sm font-medium text-ink-700 hover:bg-ink-50 transition-base">
+          <ArrowLeft size={14} /> {t('app_back_to_docs')}
+        </button>
+        <p className="text-base font-semibold text-ink-950 truncate flex-1 text-center">{currentDoc?.title}</p>
+        <div className="w-[120px] hidden sm:block" />
+      </div>
+      <input
+        value={docHeader}
+        onChange={(e) => setDocHeader(e.target.value)}
+        placeholder={t('app_doc_header_ph')}
+        aria-label={t('app_doc_header')}
+        className="w-full px-3 py-2 text-sm rounded-lg border border-ink-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-base"
+      />
     </div>
   );
 
