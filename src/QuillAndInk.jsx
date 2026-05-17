@@ -60,6 +60,13 @@ const PEN_COLORS = [
 const DEFAULT_PEN_COLOR = PEN_COLORS[0].hex;
 const EMPTY_RUNS = [{ text: '', color: DEFAULT_PEN_COLOR }];
 const blankPage = () => ({ runs: [{ text: '', color: DEFAULT_PEN_COLOR }] });
+const TEMPLATES = [
+  { id: 'blank', nameKey: 'tpl_blank', descKey: 'tpl_blank_desc', bodyKey: null },
+  { id: 'letter', nameKey: 'tpl_letter', descKey: 'tpl_letter_desc', bodyKey: 'tpl_letter_body' },
+  { id: 'diary', nameKey: 'tpl_diary', descKey: 'tpl_diary_desc', bodyKey: 'tpl_diary_body' },
+  { id: 'essay', nameKey: 'tpl_essay', descKey: 'tpl_essay_desc', bodyKey: 'tpl_essay_body' },
+  { id: 'poem', nameKey: 'tpl_poem', descKey: 'tpl_poem_desc', bodyKey: 'tpl_poem_body' },
+];
 
 const tintGlyphImage = (sourceImg, hex) => {
   const cv = document.createElement('canvas');
@@ -595,13 +602,15 @@ export default function VintageCalligraphyApp({ session }) {
     return docPages.map((p, i) => (i === pageIndex ? { runs } : p));
   };
 
-  const createDocument = async () => {
+  const createDocument = async (templateId) => {
     if (!session?.user) return;
-    const title = newTitle.trim() || 'Гарчиггүй';
-    const pages = [blankPage()];
+    const tpl = TEMPLATES.find((x) => x.id === templateId) || TEMPLATES[0];
+    const title = newTitle.trim() || t(tpl.nameKey);
+    const body = tpl.bodyKey ? t(tpl.bodyKey) : '';
+    const pages = [{ runs: [{ text: body, color: DEFAULT_PEN_COLOR }] }];
     const { data, error } = await supabase
       .from('documents')
-      .insert({ user_id: session.user.id, title, template: 'blank', pages, settings: {} })
+      .insert({ user_id: session.user.id, title, template: tpl.id, pages, settings: {} })
       .select()
       .single();
     if (error) { alert('Error: ' + error.message); return; }
@@ -1415,18 +1424,24 @@ export default function VintageCalligraphyApp({ session }) {
         )}
       </div>
 
-      {creatingNew && (
+     {creatingNew && (
         <div className="rounded-xl bg-white border border-ink-200 p-4 flex flex-col gap-3">
           <label className="text-xs font-semibold uppercase tracking-wider text-ink-600">{t('app_doc_title_label')}</label>
           <input autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') createDocument(); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') createDocument('blank'); }}
             placeholder={t('app_doc_title_label')}
             className="w-full px-3 py-2 text-sm rounded-lg border border-ink-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-base" />
-          <div className="flex gap-2">
-            <button onClick={createDocument}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-base">
-              <Check size={14} /> {t('app_doc_create')}
-            </button>
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 mt-1">{t('app_choose_template')}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {TEMPLATES.map((tp) => (
+              <button key={tp.id} onClick={() => createDocument(tp.id)}
+                className="text-left rounded-lg border border-ink-200 p-3 hover:border-brand-400 hover:bg-brand-50 transition-base">
+                <p className="text-sm font-semibold text-ink-950">{t(tp.nameKey)}</p>
+                <p className="text-xs text-ink-500 mt-0.5">{t(tp.descKey)}</p>
+              </button>
+            ))}
+          </div>
+          <div>
             <button onClick={() => { setCreatingNew(false); setNewTitle(''); }}
               className="px-4 py-2 rounded-lg bg-white border border-ink-200 text-sm font-medium text-ink-700 hover:bg-ink-50 transition-base">
               {t('app_cancel')}
