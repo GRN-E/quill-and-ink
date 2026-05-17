@@ -453,7 +453,7 @@ function RichTextEditor({ runs, setRuns, currentColor, setCurrentColor, mobile, 
   );
 }
 
-function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSaveDoc, saveState, mobile, t }) {
+function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSaveDoc, saveState, exportInfo, mobile, t }) {
   const update = (key) => (e) => setSettings({ ...settings, [key]: Number(e.target.value) });
   const paperLabel = { blank: t('app_paper_blank'), lined: t('app_paper_lined'), dotted: t('app_paper_dotted'), grid: t('app_paper_grid') };
   return (
@@ -470,13 +470,13 @@ function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSa
             {saveState === 'saved' ? <Check size={12} /> : <Save size={12} />}
             {saveState === 'saving' ? t('app_saving') : saveState === 'saved' ? t('app_doc_saved') : t('app_doc_save')}
           </button>
-          <button onClick={onExportPNG}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-ink-100 text-ink-700 text-xs font-semibold hover:bg-ink-200 transition-base">
-            <ImageIcon size={12} /> PNG
+          <button onClick={onExportPNG} disabled={!!exportInfo}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-ink-100 text-ink-700 text-xs font-semibold hover:bg-ink-200 transition-base disabled:opacity-50">
+            <ImageIcon size={12} /> {exportInfo ? `${t('app_exporting')} ${exportInfo.done}/${exportInfo.total}` : 'PNG'}
           </button>
-          <button onClick={onExportPDF}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 shadow-card transition-base">
-            <FileText size={12} /> {t('app_export_pdf')}
+          <button onClick={onExportPDF} disabled={!!exportInfo}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 shadow-card transition-base disabled:opacity-50">
+            <FileText size={12} /> {exportInfo ? `${t('app_exporting')} ${exportInfo.done}/${exportInfo.total}` : t('app_export_pdf')}
           </button>
         </div>
       </div>
@@ -563,6 +563,7 @@ export default function VintageCalligraphyApp({ session }) {
   const [renameValue, setRenameValue] = useState('');
   const [docSaveState, setDocSaveState] = useState('idle');
   const [docHeader, setDocHeader] = useState('');
+  const [exportInfo, setExportInfo] = useState(null);
   const docLoadedRef = useRef(false);
 
   const transformImageRef = useRef(null);
@@ -1223,15 +1224,21 @@ const openDocument = (doc) => {
     });
   });
 
-  const exportNotebookPNG = () => {
-    const cv = previewCanvasRef.current?.getCanvas?.();
-    if (!cv) { alert(t('app_no_glyphs')); return; }
-    const totalText = runs.map((r) => r.text).join('');
-    if (!totalText.trim()) { alert(t('app_empty_hint')); return; }
-    const link = document.createElement('a');
-    link.download = (currentDoc?.title || 'inkly') + '-' + (pageIndex + 1) + '.png';
-    link.href = cv.toDataURL('image/png');
-    link.click();
+  const exportNotebookPNG = async () => {
+    const pages = buildPagesWithCurrent();
+    const nonEmpty = pages.filter((p) => p.runs.map((r) => r.text).join('').trim());
+    if (nonEmpty.length === 0) { alert(t('app_empty_hint')); return; }
+    const base = currentDoc?.title || 'inkly';
+    for (let i = 0; i < nonEmpty.length; i++) {
+      setExportInfo({ done: i + 1, total: nonEmpty.length });
+      const cv = await renderToCanvas(nonEmpty[i].runs, docHeader);
+      const link = document.createElement('a');
+      link.download = base + '-' + (i + 1) + '.png';
+      link.href = cv.toDataURL('image/png');
+      link.click();
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    setExportInfo(null);
   };
 
   const exportNotebookPDF = async () => {
@@ -1244,8 +1251,10 @@ const openDocument = (doc) => {
     const margin = 36;
     const usableW = pageW - margin * 2;
     const usableH = pageH - margin * 2;
-    for (let i = 0; i < pages.length; i++) {
-      const cv = await renderToCanvas(pages[i].runs, docHeader);
+    setExportInfo({ done: 0, total: nonEmpty.length });     
+    for (let i = 0; i < nonEmpty.length; i++) {
+      setExportInfo({ done: i + 1, total: nonEmpty.length });       
+      const cv = await renderToCanvas(nonEmpty[i].runs, docHeader);
       const imgData = cv.toDataURL('image/png');
       const imgW = usableW;
       const imgH = (cv.height / cv.width) * imgW;
@@ -1267,7 +1276,8 @@ const openDocument = (doc) => {
         }
       }
     }
-    pdf.save((currentDoc?.title || 'inkly') + '.pdf');
+    pdf.save((currentDoc?.title || 'inkly') + '.pdf');     
+    setExportInfo(null);
   };
 
   const drawingHint = () => {
@@ -1695,7 +1705,7 @@ const openDocument = (doc) => {
               {notebookMode === 'preview' && (
                 <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
                   onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveDoc={saveCurrentDocument}
-                  saveState={docSaveState} mobile={true} t={t} />
+                  saveState={docSaveState} exportInfo={exportInfo} mobile={true} t={t} />
               )}
               <div className="flex-1 min-h-0" style={{ minHeight: '300px' }}>
                 {notebookMode === 'write'
@@ -1794,7 +1804,7 @@ const openDocument = (doc) => {
               {renderPageBar()}
               <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
                 onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveDoc={saveCurrentDocument}
-                saveState={docSaveState} mobile={false} t={t} />
+                saveState={docSaveState} exportInfo={exportInfo} mobile={false} t={t} />
               <div className="flex-1 min-h-0 grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 flex items-center gap-1.5"><PenLine size={12} /> {t('app_write')}</p>
