@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './supabase';
 import { LanguageProvider } from './i18n';
+import { PlanProvider, usePlan } from './PlanContext';
 import Auth from './Auth';
 import QuillAndInk from './QuillAndInk';
 import Landing from './pages/Landing';
@@ -37,6 +38,21 @@ function LoadingScreen() {
   );
 }
 
+// TEMPORARY debug badge — shows the detected plan. Removed in a later stage.
+function PlanDebugBadge() {
+  const { plan, planLoading } = usePlan();
+  return (
+    <div style={{
+      position: 'fixed', bottom: 8, right: 8, zIndex: 9999,
+      background: '#0a0a0a', color: '#fff', fontSize: 11,
+      padding: '4px 8px', borderRadius: 6, fontFamily: 'monospace',
+      opacity: 0.7, pointerEvents: 'none',
+    }}>
+      plan: {planLoading ? '…' : plan}
+    </div>
+  );
+}
+
 export default function App() {
   const { session, loading } = useSession();
 
@@ -44,30 +60,33 @@ export default function App() {
 
   return (
     <LanguageProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Landing session={session} />} />
-          <Route path="/pricing" element={<Pricing session={session} />} />
-          <Route path="/about" element={<About session={session} />} />
-          <Route
-            path="/login"
-            element={session ? <Navigate to="/app" replace /> : <Auth />}
-          />
-          <Route
-            path="/signup"
-            element={session ? <Navigate to="/app" replace /> : <Auth />}
-          />
-          <Route
-            path="/app"
-            element={
-              <ProtectedRoute session={session}>
-                <QuillAndInk session={session} />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <PlanProvider session={session}>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Landing session={session} />} />
+            <Route path="/pricing" element={<Pricing session={session} />} />
+            <Route path="/about" element={<About session={session} />} />
+            <Route
+              path="/login"
+              element={session ? <Navigate to="/app" replace /> : <Auth />}
+            />
+            <Route
+              path="/signup"
+              element={session ? <Navigate to="/app" replace /> : <Auth />}
+            />
+            <Route
+              path="/app"
+              element={
+                <ProtectedRoute session={session}>
+                  <QuillAndInk session={session} />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+        <PlanDebugBadge />
+      </PlanProvider>
     </LanguageProvider>
   );
 }
