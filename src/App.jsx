@@ -8,6 +8,7 @@ import QuillAndInk from './QuillAndInk';
 import Landing from './pages/Landing';
 import Pricing from './pages/Pricing';
 import Upgrade from './pages/Upgrade';
+import Account from './pages/Account';
 import About from './pages/About';
 
 function useSession() {
@@ -81,6 +82,14 @@ export default function App() {
               element={
                 <ProtectedRoute session={session}>
                   <QuillAndInk session={session} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/account"
+              element={
+                <ProtectedRoute session={session}>
+                  <Account session={session} />
                 </ProtectedRoute>
               }
             />
