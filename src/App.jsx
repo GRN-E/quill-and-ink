@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './supabase';
-import { LanguageProvider } from './i18n';
+import { LanguageProvider, useLang } from './i18n';
 import { PlanProvider, usePlan } from './PlanContext';
+import AdModal from './AdModal';
 import Auth from './Auth';
 import QuillAndInk from './QuillAndInk';
 import Landing from './pages/Landing';
@@ -53,6 +54,32 @@ function PlanDebugBadge() {
   );
 }
 
+// TEMPORARY ad-modal tester — removed in G5b once the ad gate is wired.
+function AdModalTester() {
+  const { t } = useLang();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          position: 'fixed', bottom: 8, left: 8, zIndex: 9999,
+          background: '#4f46e5', color: '#fff', fontSize: 11,
+          padding: '4px 8px', borderRadius: 6, fontFamily: 'monospace',
+        }}
+      >
+        test ad
+      </button>
+      <AdModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onReward={() => alert('Reward granted (test)')}
+        t={t}
+      />
+    </>
+  );
+}
+
 export default function App() {
   const { session, loading } = useSession();
 
@@ -86,6 +113,7 @@ export default function App() {
           </Routes>
         </BrowserRouter>
         <PlanDebugBadge />
+        <AdModalTester />
       </PlanProvider>
     </LanguageProvider>
   );
