@@ -12,6 +12,7 @@ import Logo from './components/Logo';
 import { useLang } from './i18n';
 import { usePlan } from './PlanContext';
 import { getPlan } from './planLimits';
+import AdModal from './AdModal';
 
 const UPPER = 'АБВГДЕЁЖЗИЙКЛМНОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯ'.split('');
 const LOWER = 'абвгдеёжзийклмноөпрстуүфхцчшщъыьэюя'.split('');
@@ -533,7 +534,7 @@ function NotebookToolbar({ settings, setSettings, onExportPNG, onExportPDF, onSa
 export default function VintageCalligraphyApp({ session }) {
   const navigate = useNavigate();
   const { t } = useLang();
-  const { plan } = usePlan();
+  const { plan, profile, refreshPlan } = usePlan();
   const planConf = getPlan(plan);
   const maxDocs = planConf.maxDocuments;
 
@@ -570,7 +571,7 @@ export default function VintageCalligraphyApp({ session }) {
   const [docHeader, setDocHeader] = useState('');
   const [exportInfo, setExportInfo] = useState(null);
   const [autoSave, setAutoSave] = useState('idle');
-  const [docOpening, setDocOpening] = useState(false);
+  const [adOpen, setAdOpen] = useState(false);
   const docLoadedRef = useRef(false);
 
   const transformImageRef = useRef(null);
@@ -1254,6 +1255,32 @@ const openDocument = (doc) => {
     setExportInfo(null);
   };
 
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+  const adUnlocksUsedToday = () => {
+    if (!profile) return 0;
+    if (profile.ad_unlocks_date !== todayStr()) return 0;
+    return profile.ad_unlocks_count || 0;
+  };
+  const handlePngExport = () => {
+    if (!planConf.pngRequiresAd) { exportNotebookPNG(); return; }
+    if (adUnlocksUsedToday() >= planConf.maxAdUnlocksPerDay) {
+      if (window.confirm(t('app_golden_only'))) navigate('/pricing');
+      return;
+    }
+    setAdOpen(true);
+  };
+  const handleAdReward = async () => {
+    if (session?.user) {
+      const today = todayStr();
+      const sameDay = profile && profile.ad_unlocks_date === today;
+      const nextCount = (sameDay ? (profile.ad_unlocks_count || 0) : 0) + 1;
+      await supabase.from('profiles')
+        .update({ ad_unlocks_date: today, ad_unlocks_count: nextCount, updated_at: new Date().toISOString() })
+        .eq('user_id', session.user.id);
+      if (refreshPlan) refreshPlan();
+    }
+    exportNotebookPNG();
+  };
   const exportNotebookPDF = async () => {
     if (!planConf.pdfExport) {
       if (window.confirm(t('app_golden_only'))) navigate('/pricing');
@@ -1644,6 +1671,7 @@ const openDocument = (doc) => {
   if (isMobile) {
     return (
       <div className="flex flex-col bg-ink-50" style={{ height: '100dvh', paddingTop: 'env(safe-area-inset-top,0px)', paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
+        <AdModal open={adOpen} onClose={() => setAdOpen(false)} onReward={handleAdReward} t={t} />
         {renderTopBar()}
         <div className="flex gap-1 px-3 py-2 bg-white border-b border-ink-200">
           <button onClick={() => setActiveView('editor')} className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-base ${activeView === 'editor' ? 'bg-brand-600 text-white' : 'text-ink-600 hover:bg-ink-100'}`}>
@@ -1751,7 +1779,7 @@ const openDocument = (doc) => {
               </div>
               {notebookMode === 'preview' && (
                 <NotebookToolbar settings={notebookSettings} setSettings={setNotebookSettings}
-                  onExportPNG={exportNotebookPNG} onExportPDF={exportNotebookPDF} onSaveDoc={saveCurrentDocument}
+                  onExportPNG={handlePngExport} onExportPDF={exportNotebookPDF} onSaveDoc={saveCurrentDocument}
                   saveState={docSaveState} exportInfo={exportInfo} mobile={true} t={t} />
               )}
               <div className="flex-1 min-h-0" style={{ minHeight: '300px' }}>
@@ -1779,6 +1807,7 @@ const openDocument = (doc) => {
 
   return (
     <div className="flex flex-col h-screen bg-ink-50">
+      <AdModal open={adOpen} onClose={() => setAdOpen(false)} onReward={handleAdReward} t={t} />
       {renderTopBar()}
       <div className="flex-1 min-h-0 flex">
         <aside className="w-72 flex-shrink-0 flex flex-col bg-white border-r border-ink-200">
