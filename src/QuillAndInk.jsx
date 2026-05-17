@@ -627,6 +627,7 @@ export default function VintageCalligraphyApp({ session }) {
   const createDocument = async (templateId) => {
     if (!session?.user) return;
     if (docs.length >= maxDocs) { alert(t('app_limit_docs_body').replace('{max}', String(maxDocs))); return; }
+    if (!planConf.templates.includes(templateId)) { navigate('/pricing'); return; }
     const tpl = TEMPLATES.find((x) => x.id === templateId) || TEMPLATES[0];
     const title = newTitle.trim() || t(tpl.nameKey);
     const body = tpl.bodyKey ? t(tpl.bodyKey) : '';
@@ -1496,13 +1497,25 @@ const openDocument = (doc) => {
             className="w-full px-3 py-2 text-sm rounded-lg border border-ink-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-base" />
           <p className="text-xs font-semibold uppercase tracking-wider text-ink-600 mt-1">{t('app_choose_template')}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {TEMPLATES.map((tp) => (
-              <button key={tp.id} onClick={() => createDocument(tp.id)}
-                className="text-left rounded-lg border border-ink-200 p-3 hover:border-brand-400 hover:bg-brand-50 transition-base">
-                <p className="text-sm font-semibold text-ink-950">{t(tp.nameKey)}</p>
-                <p className="text-xs text-ink-500 mt-0.5">{t(tp.descKey)}</p>
-              </button>
-            ))}
+            {TEMPLATES.map((tp) => {
+              const allowed = planConf.templates.includes(tp.id);
+              return allowed ? (
+                <button key={tp.id} onClick={() => createDocument(tp.id)}
+                  className="text-left rounded-lg border border-ink-200 p-3 hover:border-brand-400 hover:bg-brand-50 transition-base">
+                  <p className="text-sm font-semibold text-ink-950">{t(tp.nameKey)}</p>
+                  <p className="text-xs text-ink-500 mt-0.5">{t(tp.descKey)}</p>
+                </button>
+              ) : (
+                <button key={tp.id} onClick={() => navigate('/pricing')}
+                  className="text-left rounded-lg border border-amber-200 bg-amber-50/40 p-3 hover:bg-amber-50 transition-base relative">
+                  <span className="absolute top-2 right-2 inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                    🔒 {t('app_locked_golden')}
+                  </span>
+                  <p className="text-sm font-semibold text-ink-700">{t(tp.nameKey)}</p>
+                  <p className="text-xs text-ink-500 mt-0.5">{t(tp.descKey)}</p>
+                </button>
+              );
+            })}
           </div>
           <div>
             <button onClick={() => { setCreatingNew(false); setNewTitle(''); }}
