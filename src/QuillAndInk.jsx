@@ -564,6 +564,8 @@ export default function VintageCalligraphyApp({ session }) {
   const [docSaveState, setDocSaveState] = useState('idle');
   const [docHeader, setDocHeader] = useState('');
   const [exportInfo, setExportInfo] = useState(null);
+  const [autoSave, setAutoSave] = useState('idle');
+  const [docOpening, setDocOpening] = useState(false);
   const docLoadedRef = useRef(false);
 
   const transformImageRef = useRef(null);
@@ -657,11 +659,12 @@ const openDocument = (doc) => {
   };
 
   const openDocumentById = async (id) => {
+    setDocOpening(true);
     const { data, error } = await supabase.from('documents').select('*').eq('id', id).single();
-    if (error) { alert('Error: ' + error.message); return; }
+    if (error) { setDocOpening(false); alert('Error: ' + error.message); return; }
     openDocument(data);
+    setDocOpening(false);
   };
-
   const goToPage = (idx) => {
     if (idx < 0 || idx >= docPages.length || idx === pageIndex) return;
     const merged = buildPagesWithCurrent();
@@ -713,11 +716,14 @@ const openDocument = (doc) => {
   useEffect(() => {
     if (!currentDoc || notebookScreen !== 'editor' || !docLoadedRef.current) return;
     const tm = setTimeout(async () => {
+      setAutoSave('saving');
       const pages = buildPagesWithCurrent();
       await supabase.from('documents')
         .update({ pages, settings: { nb: notebookSettings, header: docHeader }, updated_at: new Date().toISOString() })
         .eq('id', currentDoc.id);
       setDocs((prev) => prev.map((d) => d.id === currentDoc.id ? { ...d, updated_at: new Date().toISOString() } : d));
+      setAutoSave('saved');
+      setTimeout(() => setAutoSave('idle'), 2000);
     }, 1500);
     return () => clearTimeout(tm);
   }, [runs, currentDoc, notebookScreen, pageIndex, notebookSettings, docHeader]);
@@ -1447,6 +1453,9 @@ const openDocument = (doc) => {
   };
 
   const renderDocumentList = () => (
+    docOpening ? (
+      <div className="max-w-4xl mx-auto w-full py-20 text-center text-sm text-ink-500">{t('app_loading')}</div>
+    ) : (
     <div className="max-w-4xl mx-auto w-full flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
@@ -1542,6 +1551,7 @@ const openDocument = (doc) => {
         </div>
       )}
     </div>
+    )
   );
 
   const renderDocBackBar = () => (
@@ -1552,7 +1562,10 @@ const openDocument = (doc) => {
           <ArrowLeft size={14} /> {t('app_back_to_docs')}
         </button>
         <p className="text-base font-semibold text-ink-950 truncate flex-1 text-center">{currentDoc?.title}</p>
-        <div className="w-[120px] hidden sm:block" />
+        <div className="w-[140px] hidden sm:flex justify-end items-center">
+          {autoSave === 'saving' && <span className="text-xs text-ink-500">{t('app_autosaving')}</span>}
+          {autoSave === 'saved' && <span className="text-xs text-green-600 inline-flex items-center gap-1"><Check size={12} /> {t('app_autosaved')}</span>}
+        </div>
       </div>
       <input
         value={docHeader}
@@ -1691,7 +1704,7 @@ const openDocument = (doc) => {
           ) : notebookScreen === 'list' ? (
             <div className="flex-1 min-h-0 overflow-y-auto p-3">{renderDocumentList()}</div>
           ) : (
-            <div className="flex-1 min-h-0 flex flex-col p-3 gap-2 overflow-y-auto">
+            <div className="flex-1 min-h-0 flex flex-col p-3 gap-3 overflow-y-auto">
               {renderDocBackBar()}
               {renderPageBar()}
               <div className="flex gap-1 flex-shrink-0">
