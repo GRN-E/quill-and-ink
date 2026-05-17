@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './supabase';
 import { LanguageProvider } from './i18n';
-import { PlanProvider, usePlan } from './PlanContext';
+import { PlanProvider } from './PlanContext';
 import Auth from './Auth';
 import QuillAndInk from './QuillAndInk';
 import Landing from './pages/Landing';
@@ -36,21 +36,6 @@ function LoadingScreen() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="text-ink-400 text-sm">Loading…</div>
-    </div>
-  );
-}
-
-// TEMPORARY debug badge — shows the detected plan. Removed in the final cleanup stage.
-function PlanDebugBadge() {
-  const { plan, planLoading } = usePlan();
-  return (
-    <div style={{
-      position: 'fixed', bottom: 8, right: 8, zIndex: 9999,
-      background: '#0a0a0a', color: '#fff', fontSize: 11,
-      padding: '4px 8px', borderRadius: 6, fontFamily: 'monospace',
-      opacity: 0.7, pointerEvents: 'none',
-    }}>
-      plan: {planLoading ? '…' : plan}
     </div>
   );
 }
@@ -96,7 +81,6 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
-        <PlanDebugBadge />
       </PlanProvider>
     </LanguageProvider>
   );
