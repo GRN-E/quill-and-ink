@@ -18,7 +18,7 @@ function Row({ label, value }) {
 export default function Account({ session }) {
   const { t } = useLang();
   const navigate = useNavigate();
-  const { plan, profile } = usePlan();
+  const { plan, profile, refreshPlan } = usePlan();
   const conf = getPlan(plan);
   const [docCount, setDocCount] = useState(null);
 
@@ -41,6 +41,16 @@ export default function Account({ session }) {
   const isFree = plan === 'free';
   const fmtDate = (s) => {
     try { return new Date(s).toLocaleDateString(); } catch (e) { return '—'; }
+  };
+
+  // DEV ONLY — hidden in production (import.meta.env.DEV is false on Vercel).
+  // TODO: real plan changes must come from a trusted server action after payment.
+  const setDevPlan = async (next) => {
+    if (!session?.user) return;
+    await supabase.from('profiles')
+      .update({ plan: next, updated_at: new Date().toISOString() })
+      .eq('user_id', session.user.id);
+    if (refreshPlan) refreshPlan();
   };
 
   return (
@@ -92,6 +102,23 @@ export default function Account({ session }) {
           <p className="text-xs font-semibold uppercase tracking-wider text-ink-500 mb-2">{t('acc_billing')}</p>
           <p className="text-sm text-ink-500">{t('acc_billing_soon')}</p>
         </section>
+
+        {import.meta.env.DEV && (
+          <section className="rounded-2xl bg-amber-50 border border-amber-200 p-6">
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-800 mb-2">DEV ONLY — testing</p>
+            <p className="text-sm text-amber-800 mb-3">Hidden in production. Switch plan to test gating locally.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setDevPlan('free')}
+                className="px-4 py-2 rounded-lg bg-white border border-amber-200 text-sm font-semibold text-amber-900 hover:bg-amber-100 transition-base">
+                Set Free
+              </button>
+              <button onClick={() => setDevPlan('golden')}
+                className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition-base">
+                Set Golden
+              </button>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );
