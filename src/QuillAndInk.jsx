@@ -25,8 +25,8 @@ const CATEGORIES = {
 };
 const ALL_CHARS = [...UPPER, ...LOWER, ...NUMS];
 
-const CYR_DESCENDERS = 'руфцщ';
-const CYR_ASCENDERS = 'б';
+const CYR_DESCENDERS = 'дзрфцщуү';
+const CYR_ASCENDERS = 'бв';
 
 const classifyChar = (ch) => {
   if (UPPER.includes(ch)) return 'cap';
