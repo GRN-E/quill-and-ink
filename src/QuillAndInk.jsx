@@ -572,6 +572,7 @@ export default function VintageCalligraphyApp({ session }) {
   const [exportInfo, setExportInfo] = useState(null);
   const [autoSave, setAutoSave] = useState('idle');
   const [adOpen, setAdOpen] = useState(false);
+  const [docOpening, setDocOpening] = useState(false);
   const docLoadedRef = useRef(false);
 
   const transformImageRef = useRef(null);
