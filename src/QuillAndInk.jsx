@@ -39,8 +39,8 @@ const classifyChar = (ch) => {
   return 'cap';
 };
 
-const CLASS_HEIGHT = { cap: 1.0, ascender: 1.0, xheight: 0.62, descender: 0.78 };
-const CLASS_DROP = { cap: 0, ascender: 0, xheight: 0, descender: 0.30 };
+const CLASS_HEIGHT = { cap: 1.0, ascender: 1.0, xheight: 0.62, descender: 0.88 };
+const CLASS_DROP = { cap: 0, ascender: 0, xheight: 0, descender: 0.25 };
 
 const GUIDE_CAP = 0.18;
 const GUIDE_XHEIGHT = 0.45;
