@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { supabase } from './supabase';
 import { LanguageProvider } from './i18n';
 import { PlanProvider } from './PlanContext';
@@ -81,6 +82,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
+        <SpeedInsights />
       </PlanProvider>
     </LanguageProvider>
   );
